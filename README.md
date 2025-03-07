@@ -69,4 +69,4 @@ Survive as long as possible while destroying enemy ships and achieving the highe
 
 ## Credits
 
-Created as a demonstration of pygame capabilities. 
+Made by Alexander Dial and Gavriel Rodriguez
