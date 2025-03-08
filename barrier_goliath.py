@@ -217,6 +217,19 @@ class BarrierGoliath(pygame.sprite.Sprite):
             # Give score
             self.game_state.score += self.score_value
             
+            # Spawn a shop portal for game progression
+            # Import the spawn function from the main module
+            import sys
+            main_module = sys.modules['__main__']
+            if hasattr(main_module, 'spawn_shop_portal'):
+                main_module.spawn_shop_portal(self.rect.centerx, self.rect.centery)
+                print("Mini-boss defeated! Called spawn_shop_portal function")
+            else:
+                print("ERROR: spawn_shop_portal function not found in main module")
+            
+            # Reset boss_fight flag directly as a backup
+            self.game_state.boss_fight = False
+            
             # Remove the mini-boss from the game
             self.kill()
             

@@ -1443,14 +1443,8 @@ class Boss(pygame.sprite.Sprite):
                 powerups.add(power_up)
             
             # Spawn a shop portal where the boss was
-            portal = ShopPortal(self.rect.centerx, self.rect.centery)
-            all_sprites.add(portal)
-            
-            # Add portal to a new sprite group for collision detection
-            if 'shop_portals' not in globals():
-                global shop_portals
-                shop_portals = pygame.sprite.Group()
-            shop_portals.add(portal)
+            spawn_shop_portal(self.rect.centerx, self.rect.centery)
+            print(f"Boss defeated in sector {self.sector}! Shop portal spawned.")
             
             # Remove the boss
             self.kill()
@@ -1555,11 +1549,33 @@ class GameState:
         self.boss_fight = False
         self.wave_enemies = 5
         self.waves_per_sector = 5  # Waves to complete before boss
+        self.bosses_defeated = 0  # Reset boss defeat counter
+        
+        # Clear endless mode
+        if hasattr(self, 'endless_mode'):
+            delattr(self, 'endless_mode')
         
     def next_wave(self):
+        # Special handling for endless mode wave transitions
+        if hasattr(self, 'endless_mode') and self.endless_mode and self.sector >= 7:
+            print(f"Endless mode wave transition: Sector {self.sector}, Wave {self.wave}")
+            # Make sure we don't get stuck in high sectors
+            if self.wave >= self.waves_per_sector:
+                print(f"Forcing wave progression in sector {self.sector}")
+            
         self.wave += 1
-        if self.wave > self.waves_per_sector:
-            # Boss wave
+        
+        # Print debug info for wave progression
+        print(f"Next wave: Sector {self.sector}, Wave {self.wave}, waves_per_sector: {self.waves_per_sector}")
+        
+        # Ensure boss fights happen in endless mode
+        if hasattr(self, 'endless_mode') and self.endless_mode and self.sector >= 7 and self.wave > self.waves_per_sector:
+            # Boss wave in endless mode
+            print(f"Triggering boss wave in endless mode sector {self.sector}")
+            self.boss_fight = True
+            return True
+        elif self.wave > self.waves_per_sector:
+            # Normal boss wave
             self.boss_fight = True
             return True
         return False
@@ -1568,19 +1584,33 @@ class GameState:
         self.sector += 1
         self.wave = 1
         self.boss_fight = False
-        self.resources += 100 * self.sector  # Award resources for sector completion
         
-        # Increase difficulty - more gradual progression
-        self.wave_enemies += 1  # Add just 1 enemy per sector instead of 2
-        self.difficulty_multiplier += 0.15  # 15% increase per sector
+        # Debug info for sector transitions
+        print(f"Moving to next sector: {self.sector}")
+        
+        # Award resources for sector completion
+        self.resources += 100 * self.sector
         
         # Track bosses defeated
         self.bosses_defeated += 1
         
-        # Game completed if all sectors done
-        if self.sector > 6:
+        # Game completed if reached sector 6 - transition to victory screen
+        if self.sector > 6 and not hasattr(self, 'endless_mode'):
             self.state = "victory"
             return True
+            
+        # Handle endless mode progression
+        if hasattr(self, 'endless_mode') and self.endless_mode:
+            # Keep boss fights coming at a regular cadence
+            self.waves_per_sector = 4  # Fewer waves between bosses in endless mode
+            print(f"Endless mode sector {self.sector}, waves_per_sector set to {self.waves_per_sector}")
+            
+            # Increase enemy count but cap it
+            self.wave_enemies = min(15, 5 + self.sector)  # Cap at 15 enemies per wave
+        else:
+            # Regular progression - more gradual
+            self.wave_enemies = min(15, 5 + self.sector)  # Cap at 15 enemies per wave
+        
         return False
 
     def get_item_price(self, item_type, base_price):
@@ -1930,8 +1960,32 @@ def cleanup_sprites():
                 sprite.rect.left > WIDTH + 100):
                 sprite.kill()
 
+def spawn_shop_portal(x, y):
+    """Spawn a shop portal at the given coordinates.
+    This function can be called by any entity when a shop portal should appear.
+    """
+    print(f"Spawning shop portal at {x}, {y}")
+    
+    # Create a new portal
+    portal = ShopPortal(x, y)
+    all_sprites.add(portal)
+    
+    # Ensure shop_portals is initialized
+    if 'shop_portals' not in globals():
+        global shop_portals
+        shop_portals = pygame.sprite.Group()
+    
+    # Add the portal to the sprite group
+    shop_portals.add(portal)
+    
+    # Reset boss_fight flag to allow next wave to start
+    game_state.boss_fight = False
+    
+    return portal
+
 # Initialize game state
-running = True
+if __name__ == "__main__":
+    running = True
 
 # Main game loop
 while running:
@@ -2090,14 +2144,65 @@ while running:
                     # Double-check that portals are removed - redundant but kept for safety
                     shop_portals.empty()
         
+        # Debug output before checking for wave completion
+        if len(enemies) == 0 and game_state.state == "playing" and hasattr(game_state, 'endless_mode') and game_state.endless_mode:
+            print(f"No enemies present. boss_fight={game_state.boss_fight}, portals={len(shop_portals) if 'shop_portals' in globals() else 'not defined'}")
+        
         # Check for wave completion
         if len(enemies) == 0 and not game_state.boss_fight and 'shop_portals' in globals() and len(shop_portals) == 0:
-            # Move to next wave
+            # Debug info for the second check
+            print(f"Second wave completion check - Sector {game_state.sector}, Wave {game_state.wave}")
+            
+            # Check for special cases in endless mode for high sectors
+            if hasattr(game_state, 'endless_mode') and game_state.endless_mode and game_state.sector >= 7 and game_state.wave >= game_state.waves_per_sector:
+                print(f"Second check - Forcing boss fight for sector {game_state.sector}, wave {game_state.wave}")
+                game_state.boss_fight = True
+                
+                # Force boss spawn directly instead of using next_wave()
+                if random.random() < 0.4:  # 40% chance for mini-boss
+                    mini_boss = BarrierGoliath(WIDTH, HEIGHT, game_state, all_sprites, enemies, enemy_bullets, powerups, PowerUp, EnemySpreadBullet)
+                    health_multiplier = 1 + (game_state.sector - 6) * 0.2
+                    mini_boss.max_health *= health_multiplier
+                    mini_boss.health = mini_boss.max_health
+                    all_sprites.add(mini_boss)
+                    enemies.add(mini_boss)
+                    print(f"Second check - Spawned mini-boss for sector {game_state.sector}")
+                else:
+                    boss = Boss(game_state.sector)
+                    health_multiplier = 1 + (game_state.sector - 6) * 0.3
+                    boss.max_health *= health_multiplier
+                    boss.health = boss.max_health
+                    all_sprites.add(boss)
+                    bosses.add(boss)
+                    print(f"Second check - Spawned boss for sector {game_state.sector}")
+                
+                game_state.wave = 1  # Reset wave counter
+                continue
+            
+            # Standard wave progression
             if game_state.next_wave():
                 # Boss fight time!
-                boss = Boss(game_state.sector)
-                all_sprites.add(boss)
-                bosses.add(boss)
+                
+                # In endless mode (after sector 6), sometimes spawn mini-boss instead
+                if game_state.sector > 6 and random.random() < 0.4 and not hasattr(game_state, 'endless_mode'):  # Only execute in regular game mode
+                    # This is handled by our special case above in endless mode
+                    mini_boss = BarrierGoliath(WIDTH, HEIGHT, game_state, all_sprites, enemies, enemy_bullets, powerups, PowerUp, EnemySpreadBullet)
+                    mini_boss.max_health *= 1 + (game_state.sector - 6) * 0.2  # +20% health per sector above 6
+                    mini_boss.health = mini_boss.max_health
+                    all_sprites.add(mini_boss)
+                    enemies.add(mini_boss)
+                elif not hasattr(game_state, 'endless_mode'):  # Only execute in regular game mode
+                    # This is handled by our special case above in endless mode
+                    boss = Boss(game_state.sector)
+                    if game_state.sector > 6:
+                        health_multiplier = 1 + (game_state.sector - 6) * 0.3  # +30% health per sector above 6
+                        boss.max_health *= health_multiplier
+                        boss.health = boss.max_health
+                        boss.shoot_delay = max(300, boss.shoot_delay * 0.8)  # Faster shooting (min 300ms)
+                        boss.score_value = 500 + (game_state.sector - 6) * 300  # More points in higher sectors
+                    all_sprites.add(boss)
+                    bosses.add(boss)
+                
                 game_state.boss_fight = True
             else:
                 # Spawn more enemies
@@ -2148,17 +2253,44 @@ while running:
         # Start Game button
         if draw_button(gameplay_surface, "Start Game", 30, WIDTH/2, button_y, button_width, button_height):
             game_state.state = "playing"
+        
+        # Endless Mode button
+        if draw_button(gameplay_surface, "Endless Mode", 30, WIDTH/2, button_y + spacing, button_width, button_height):
+            # Set up for endless mode
+            game_state.state = "playing"
+            game_state.sector = 7  # Start at sector 7 (beyond sector 6)
+            game_state.wave = 1
+            game_state.endless_mode = True
+            game_state.waves_per_sector = 4  # Fewer waves before boss fights
+            game_state.bosses_defeated = 6  # Ensure drone slot upgrades are available
+            game_state.resources = 1000  # Give extra starting resources for upgrades
             
+            # Create a powerful starter player for endless mode
+            player.max_health = 200
+            player.health = 200
+            player.max_energy = 150
+            player.energy = 150
+            player.energy_regen = 0.7
+            player.weapon_level = 3  # Start with level 3 weapons
+            
+            # Start with 2 drones
+            player.max_drones = 4
+            for i in range(2):
+                player.add_drone()
+        
         # Controls button
-        if draw_button(gameplay_surface, "Controls", 30, WIDTH/2, button_y + spacing, button_width, button_height):
+        if draw_button(gameplay_surface, "Controls", 30, WIDTH/2, button_y + spacing*2, button_width, button_height):
             show_controls_screen()
             
         # Difficulty button
-        if draw_button(gameplay_surface, "Difficulty", 30, WIDTH/2, button_y + spacing*2, button_width, button_height):
+        if draw_button(gameplay_surface, "Difficulty", 30, WIDTH/2, button_y + spacing*3, button_width, button_height):
             show_difficulty_screen()
         
         # Display current difficulty
         draw_text(gameplay_surface, f"Current Difficulty: {game_state.difficulty.capitalize()}", 18, WIDTH / 2, HEIGHT - 50)
+        
+        # Endless mode description
+        draw_text(gameplay_surface, "Endless Mode: Skip to high difficulty infinite play with upgraded ship", 16, WIDTH / 2, HEIGHT - 20, color=(180, 180, 255))
             
     elif game_state.state == "playing":
         # Draw all sprites to the gameplay surface
@@ -2209,14 +2341,65 @@ while running:
                 trail_rect.center = (player.rect.centerx, player.rect.centery + (i * 15))
                 gameplay_surface.blit(s, trail_rect)
                 
+        # Debug output before checking for wave completion (second check)
+        if len(enemies) == 0 and game_state.state == "playing" and hasattr(game_state, 'endless_mode') and game_state.endless_mode:
+            print(f"Second check - No enemies present. boss_fight={game_state.boss_fight}, portals={len(shop_portals) if 'shop_portals' in globals() else 'not defined'}")
+        
         # Check for wave completion
         if len(enemies) == 0 and not game_state.boss_fight and 'shop_portals' in globals() and len(shop_portals) == 0:
-            # Move to next wave
+            # Debug info for the second check
+            print(f"Second wave completion check - Sector {game_state.sector}, Wave {game_state.wave}")
+            
+            # Check for special cases in endless mode for high sectors
+            if hasattr(game_state, 'endless_mode') and game_state.endless_mode and game_state.sector >= 7 and game_state.wave >= game_state.waves_per_sector:
+                print(f"Second check - Forcing boss fight for sector {game_state.sector}, wave {game_state.wave}")
+                game_state.boss_fight = True
+                
+                # Force boss spawn directly instead of using next_wave()
+                if random.random() < 0.4:  # 40% chance for mini-boss
+                    mini_boss = BarrierGoliath(WIDTH, HEIGHT, game_state, all_sprites, enemies, enemy_bullets, powerups, PowerUp, EnemySpreadBullet)
+                    health_multiplier = 1 + (game_state.sector - 6) * 0.2
+                    mini_boss.max_health *= health_multiplier
+                    mini_boss.health = mini_boss.max_health
+                    all_sprites.add(mini_boss)
+                    enemies.add(mini_boss)
+                    print(f"Second check - Spawned mini-boss for sector {game_state.sector}")
+                else:
+                    boss = Boss(game_state.sector)
+                    health_multiplier = 1 + (game_state.sector - 6) * 0.3
+                    boss.max_health *= health_multiplier
+                    boss.health = boss.max_health
+                    all_sprites.add(boss)
+                    bosses.add(boss)
+                    print(f"Second check - Spawned boss for sector {game_state.sector}")
+                
+                game_state.wave = 1  # Reset wave counter
+                continue
+            
+            # Standard wave progression
             if game_state.next_wave():
                 # Boss fight time!
-                boss = Boss(game_state.sector)
-                all_sprites.add(boss)
-                bosses.add(boss)
+                
+                # In endless mode (after sector 6), sometimes spawn mini-boss instead
+                if game_state.sector > 6 and random.random() < 0.4 and not hasattr(game_state, 'endless_mode'):  # Only execute in regular game mode
+                    # This is handled by our special case above in endless mode
+                    mini_boss = BarrierGoliath(WIDTH, HEIGHT, game_state, all_sprites, enemies, enemy_bullets, powerups, PowerUp, EnemySpreadBullet)
+                    mini_boss.max_health *= 1 + (game_state.sector - 6) * 0.2  # +20% health per sector above 6
+                    mini_boss.health = mini_boss.max_health
+                    all_sprites.add(mini_boss)
+                    enemies.add(mini_boss)
+                elif not hasattr(game_state, 'endless_mode'):  # Only execute in regular game mode
+                    # This is handled by our special case above in endless mode
+                    boss = Boss(game_state.sector)
+                    if game_state.sector > 6:
+                        health_multiplier = 1 + (game_state.sector - 6) * 0.3  # +30% health per sector above 6
+                        boss.max_health *= health_multiplier
+                        boss.health = boss.max_health
+                        boss.shoot_delay = max(300, boss.shoot_delay * 0.8)  # Faster shooting (min 300ms)
+                        boss.score_value = 500 + (game_state.sector - 6) * 300  # More points in higher sectors
+                    all_sprites.add(boss)
+                    bosses.add(boss)
+                
                 game_state.boss_fight = True
             else:
                 # Spawn more enemies
@@ -2246,7 +2429,7 @@ while running:
                     mini_boss = BarrierGoliath(WIDTH, HEIGHT, game_state, all_sprites, enemies, enemy_bullets, powerups, PowerUp, EnemySpreadBullet)
                     all_sprites.add(mini_boss)
                     enemies.add(mini_boss)
-            
+    
         # Draw portal special effects and text
         for portal in shop_portals:
             portal.draw(gameplay_surface)
@@ -2284,18 +2467,74 @@ while running:
         draw_text(gameplay_surface, f"Final Score: {game_state.score}", 36, WIDTH / 2, HEIGHT / 2)
         draw_text(gameplay_surface, f"Max Combo: x{game_state.max_combo}", 24, WIDTH / 2, HEIGHT / 2 + 50)
         
-        # Add a continue button
-        if draw_button(gameplay_surface, "Continue", 24, WIDTH / 2, HEIGHT * 3 / 4, 200, 50):
-            # Reset game
-            game_state.reset()
+        # Draw information about endless mode
+        draw_text(gameplay_surface, "ENDLESS MODE UNLOCKED", 28, WIDTH / 2, HEIGHT / 2 + 90)
+        draw_text(gameplay_surface, "Continue with increased difficulty", 20, WIDTH / 2, HEIGHT / 2 + 120)
+        
+        # Add continue button
+        if draw_button(gameplay_surface, "Continue", 24, WIDTH / 2 - 120, HEIGHT * 3 / 4, 200, 50):
+            # Save current score as high score before resetting
+            if game_state.score > game_state.high_score:
+                game_state.high_score = game_state.score
+            
+            # Store current player attributes before continuing
+            stored_player_attributes = {
+                'weapon_level': player.weapon_level,
+                'weapon_type': player.weapon_type,
+                'drones': player.drones,
+                'drone_list': player.drone_list,
+                'max_health': player.max_health,
+                'health': player.max_health,  # Fully heal the player
+                'max_energy': player.max_energy,
+                'energy': player.max_energy,  # Fully restore energy
+                'speedx': player.speedx,
+                'speedy': player.speedy,
+                'max_drones': player.max_drones,
+                'energy_regen': player.energy_regen
+            }
+            
+            # Prepare for endless mode
+            game_state.state = "playing"
+            game_state.sector += 1  # Increase sector instead of resetting to 1
+            game_state.wave = 1
+            game_state.boss_fight = False
+            game_state.endless_mode = True  # Mark as in endless mode
+            
+            # Adjust endless mode parameters to ensure bosses spawn
+            game_state.waves_per_sector = 4  # Fewer waves before boss fights in endless mode
+            
+            # Ensure bosses_defeated is at least 6 for endless mode
+            # This guarantees drone slot upgrades are available
+            game_state.bosses_defeated = max(game_state.bosses_defeated, 6)
+            
+            # Increase difficulty
+            game_state.wave_enemies = min(15, 5 + game_state.sector)  # More enemies as you progress
+            
+            # Increase resources to help player with higher difficulty
+            additional_resources = 100 + (game_state.sector * 25)
+            game_state.resources += additional_resources
+            
+            # Reset sprite groups
             all_sprites = pygame.sprite.Group()
-            player = Player()
             bullets = pygame.sprite.Group()
             enemy_bullets = pygame.sprite.Group()
             enemies = pygame.sprite.Group()
             powerups = pygame.sprite.Group()
             bosses = pygame.sprite.Group()
             shop_portals = pygame.sprite.Group()
+            
+            # Create new player but restore previous attributes
+            player = Player()
+            
+            # Restore saved attributes
+            for attr, value in stored_player_attributes.items():
+                setattr(player, attr, value)
+                
+            # Recreate drone sprites if player had any
+            player.drone_list = []  # Clear the list of drone references
+            for i in range(stored_player_attributes['drones']):
+                player.add_drone()
+                
             all_sprites.add(player)
             
             # Create initial enemies
@@ -2304,6 +2543,18 @@ while running:
                 all_sprites.add(enemy)
                 enemies.add(enemy)
                 
+        # Add quit button
+        if draw_button(gameplay_surface, "Quit", 24, WIDTH / 2 + 120, HEIGHT * 3 / 4, 200, 50):
+            # Return to main menu
+            game_state.reset()
+            all_sprites = pygame.sprite.Group()
+            bullets = pygame.sprite.Group()
+            enemy_bullets = pygame.sprite.Group()
+            enemies = pygame.sprite.Group()
+            powerups = pygame.sprite.Group()
+            bosses = pygame.sprite.Group()
+            shop_portals = pygame.sprite.Group()
+    
     # Draw the gameplay surface to the screen with offsets
     screen.blit(gameplay_surface, (OFFSET_X, OFFSET_Y))
 
