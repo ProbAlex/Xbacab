@@ -4,6 +4,7 @@ import random
 import math
 from pygame.locals import *
 import os
+from barrier_goliath import BarrierGoliath
 
 # Set SDL audio driver to a fallback before initializing
 os.environ['SDL_AUDIODRIVER'] = 'dummy'  # This uses a dummy audio driver
@@ -39,6 +40,8 @@ GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
 YELLOW = (255, 255, 0)
 PURPLE = (128, 0, 128)
+DARK_BLUE = (0, 0, 128)
+LIGHT_BLUE = (173, 216, 230)
 
 # Load game assets
 def load_image(name, scale=1):
@@ -97,7 +100,7 @@ class Player(pygame.sprite.Sprite):
         
         self.shield_active = False
         self.shield_strength = 50
-        self.shoot_delay = 200  # 200ms = 5 shots per second
+        self.shoot_delay = 100  # 200ms = 5 shots per second
         self.last_shot = 0
         self.special_delay = 2000
         self.last_special = 0
@@ -644,6 +647,11 @@ class Enemy(pygame.sprite.Sprite):
         base_min_speed = (2 + (game_state.sector - 1) * 0.5) * difficulty_multiplier
         base_max_speed = (5 + (game_state.sector - 1) * 0.5) * difficulty_multiplier
         
+        # Common variables for all enemy types
+        self.bullets = []  # Track this enemy's bullets
+        self.last_shot = pygame.time.get_ticks() - random.randint(0, 2000)  # Random initial delay
+        
+        # Common features based on enemy type
         if enemy_type == "basic":
             self.image = pygame.Surface((40, 40), pygame.SRCALPHA)
             pygame.draw.polygon(self.image, RED, [(0, 0), (40, 0), (20, 40)])
@@ -677,7 +685,133 @@ class Enemy(pygame.sprite.Sprite):
             self.speed = random.uniform(base_min_speed, base_max_speed)
             self.shoot_delay = 1000  # Base delay
             self.score_value = 25  # Elite enemies are worth more points
-        
+            
+        # New enemy types
+        elif enemy_type == "cloaked_ambusher":
+            self.image = pygame.Surface((45, 45), pygame.SRCALPHA)
+            pygame.draw.polygon(self.image, (100, 100, 150), [(0, 0), (45, 0), (22, 45)])  # Light blue-purple
+            self.original_image = self.image.copy()
+            self.rect = self.image.get_rect()
+            
+            # Cloaking variables
+            self.visible = True
+            self.cloak_timer = random.randint(1500, 3000)  # Time until next cloak/uncloak
+            self.cloak_start = pygame.time.get_ticks()
+            self.cloak_duration = 1500  # How long it stays cloaked
+            self.alpha = 255  # Fully visible
+            
+            if game_state.difficulty == "easy":
+                self.health = 15
+            elif game_state.difficulty == "normal":
+                self.health = 20
+            else:  # hard
+                self.health = 30
+                
+            self.speed = random.uniform(base_min_speed*0.8, base_max_speed*0.8)  # Slightly slower
+            self.shoot_delay = 2500  # Longer delay between shots
+            self.burst_count = 3  # Number of shots in burst
+            self.burst_delay = 150  # Delay between shots in burst
+            self.burst_active = False
+            self.burst_shots = 0
+            self.score_value = 20
+            
+        elif enemy_type == "splitter_drone":
+            self.image = pygame.Surface((50, 50), pygame.SRCALPHA)
+            pygame.draw.circle(self.image, (0, 180, 180), (25, 25), 25)  # Teal color
+            self.rect = self.image.get_rect()
+            self.is_split = False  # Whether this is a split version
+            
+            if game_state.difficulty == "easy":
+                self.health = 20
+            elif game_state.difficulty == "normal":
+                self.health = 25
+            else:  # hard
+                self.health = 35
+                
+            self.speed = random.uniform(base_min_speed*0.9, base_max_speed*0.9)
+            self.shoot_delay = 2200
+            self.score_value = 15
+            
+        elif enemy_type == "shield_bearer":
+            self.image = pygame.Surface((55, 55), pygame.SRCALPHA)
+            pygame.draw.circle(self.image, (50, 150, 250), (27, 27), 27)  # Light blue
+            self.rect = self.image.get_rect()
+            
+            # Shield variables
+            self.shield_active = True
+            self.shield_health = 40
+            self.shield_max_health = 40
+            self.shield_regen_rate = 0.02
+            self.shield_radius = 80  # How far the shield extends
+            
+            if game_state.difficulty == "easy":
+                self.health = 15
+            elif game_state.difficulty == "normal":
+                self.health = 20
+            else:  # hard
+                self.health = 30
+                
+            self.speed = random.uniform(base_min_speed*0.7, base_max_speed*0.7)  # Slower
+            self.shoot_delay = 3000  # Shoots less often
+            self.score_value = 25
+            
+        elif enemy_type == "energy_sapper":
+            self.image = pygame.Surface((45, 55), pygame.SRCALPHA)
+            pygame.draw.ellipse(self.image, (200, 100, 200), (0, 0, 45, 55))  # Pink-purple
+            self.rect = self.image.get_rect()
+            
+            # Sapper beam variables
+            self.beam_active = False
+            self.beam_start = 0
+            self.beam_duration = 2000
+            self.beam_cooldown = 4000
+            self.beam_target = None
+            
+            if game_state.difficulty == "easy":
+                self.health = 25
+            elif game_state.difficulty == "normal":
+                self.health = 35
+            else:  # hard
+                self.health = 50
+                
+            self.speed = random.uniform(base_min_speed*0.6, base_max_speed*0.6)  # Very slow
+            self.shoot_delay = 4000  # Rarely shoots regular bullets
+            self.score_value = 30
+            
+        elif enemy_type == "blade_spinner":
+            self.image = pygame.Surface((48, 48), pygame.SRCALPHA)
+            # Draw a spinning blade-like appearance
+            points = []
+            center = (24, 24)
+            for i in range(8):  # 8-pointed star
+                angle = math.pi * i / 4
+                points.append((center[0] + 24 * math.cos(angle), center[1] + 24 * math.sin(angle)))
+                angle += math.pi / 8
+                points.append((center[0] + 12 * math.cos(angle), center[1] + 12 * math.sin(angle)))
+            pygame.draw.polygon(self.image, (255, 150, 0), points)  # Orange color
+            self.rect = self.image.get_rect()
+            
+            # Spinning variables
+            self.angle = 0
+            self.spin_speed = 5
+            self.original_image = self.image.copy()
+            self.orbit_center = None
+            self.orbit_radius = random.randint(80, 150)
+            self.orbit_speed = random.uniform(0.01, 0.03)
+            self.orbit_angle = random.uniform(0, math.pi*2)
+            self.reflect_bullets = game_state.difficulty == "hard"  # Only reflect on hard
+            
+            if game_state.difficulty == "easy":
+                self.health = 20
+            elif game_state.difficulty == "normal":
+                self.health = 30
+            else:  # hard
+                self.health = 45
+                
+            self.speed = random.uniform(base_min_speed*0.7, base_max_speed*0.7)
+            self.shoot_delay = 2500
+            self.score_value = 25
+            
         # Add random offset to shoot delay to prevent synchronized firing
         self.shoot_delay += random.randint(-500, 500)
         
@@ -687,19 +821,120 @@ class Enemy(pygame.sprite.Sprite):
         self.rect.x = random.randrange(0, WIDTH - self.rect.width)
         self.rect.y = random.randrange(-150, -50)
         
-        # Track this enemy's bullets
-        self.bullets = []
-        
     def update(self):
         # Update enemy position and shooting logic
-        self.rect.y += self.speed
         now = pygame.time.get_ticks()
         
+        # Basic enemy just moves downward
+        if self.enemy_type in ["basic", "elite"]:
+            self.rect.y += self.speed
+            
+        # Cloaked Ambusher behavior
+        elif self.enemy_type == "cloaked_ambusher":
+            self.rect.y += self.speed
+            
+            # Handle cloaking
+            if self.visible and now - self.cloak_start > self.cloak_timer:
+                # Start cloaking
+                self.visible = False
+                self.cloak_start = now
+                # Make semi-transparent
+                self.image = self.original_image.copy()
+                self.image.set_alpha(30)  # Almost invisible
+            elif not self.visible and now - self.cloak_start > self.cloak_duration:
+                # Uncloak
+                self.visible = True
+                self.cloak_start = now
+                self.cloak_timer = random.randint(2000, 4000)  # Time until next cloak
+                self.image = self.original_image.copy()
+                self.image.set_alpha(255)  # Fully visible
+                
+                # Burst attack when uncloaking
+                self.burst_active = True
+                self.burst_shots = 0
+                self.last_shot = now
+            
+            # Handle burst fire
+            if self.burst_active and now - self.last_shot > self.burst_delay:
+                self.shoot()
+                self.burst_shots += 1
+                self.last_shot = now
+                
+                # End burst after enough shots
+                if self.burst_shots >= self.burst_count:
+                    self.burst_active = False
+            
+        # Splitter Drone behavior
+        elif self.enemy_type == "splitter_drone":
+            # Just move down, splitting happens in hit() method
+            self.rect.y += self.speed
+            
+        # Shield Bearer behavior
+        elif self.enemy_type == "shield_bearer":
+            self.rect.y += self.speed
+            
+            # Regenerate shield if it's active
+            if self.shield_active and self.shield_health < self.shield_max_health:
+                self.shield_health = min(self.shield_max_health, self.shield_health + self.shield_regen_rate)
+                
+            # Check if shield should be disabled/enabled
+            if self.shield_active and self.shield_health <= 0:
+                self.shield_active = False
+            elif not self.shield_active and self.shield_health > self.shield_max_health * 0.3:
+                self.shield_active = True
+                
+        # Energy Sapper behavior
+        elif self.enemy_type == "energy_sapper":
+            self.rect.y += self.speed * 0.7  # Move slowly
+            
+            # Check if we should start/stop the beam
+            if not self.beam_active and now - self.last_shot > self.shoot_delay:
+                self.beam_active = True
+                self.beam_start = now
+                self.last_shot = now
+            elif self.beam_active and now - self.beam_start > self.beam_duration:
+                self.beam_active = False
+                
+            # If beam is active, look for player to target
+            if self.beam_active and player.rect.centerx > self.rect.left and player.rect.centerx < self.rect.right:
+                if player.rect.top > self.rect.bottom:
+                    self.beam_target = player
+                    
+                    # If player is in beam, drain energy or reduce fire rate
+                    if self.beam_target.energy > 0:
+                        self.beam_target.energy = max(0, self.beam_target.energy - 0.5)
+                    elif self.beam_target.shoot_delay < 500:
+                        self.beam_target.shoot_delay += 1  # Slowly increase shoot delay (reduce fire rate)
+            else:
+                self.beam_target = None
+                
+        # Blade Spinner behavior
+        elif self.enemy_type == "blade_spinner":
+            # Spinning orbit movement
+            if self.orbit_center is None:
+                # Set orbit center at first update
+                self.orbit_center = (self.rect.centerx, self.rect.centery + 200)
+                
+            # Update orbit angle
+            self.orbit_angle += self.orbit_speed
+            
+            # Calculate new position
+            self.rect.centerx = self.orbit_center[0] + int(math.cos(self.orbit_angle) * self.orbit_radius)
+            self.rect.centery = self.orbit_center[1] + int(math.sin(self.orbit_angle) * self.orbit_radius)
+            
+            # Also drift downward slowly
+            self.orbit_center = (self.orbit_center[0], self.orbit_center[1] + self.speed * 0.1)
+            
+            # Spin the blade
+            self.angle += self.spin_speed
+            self.image = pygame.transform.rotate(self.original_image, self.angle)
+            self.rect = self.image.get_rect(center=self.rect.center)  # Keep center position
+            
         # Check if it's time to shoot
-        if now - self.last_shot > self.shoot_delay:
+        if now - self.last_shot > self.shoot_delay and not (self.enemy_type == "cloaked_ambusher" and self.burst_active):
             self.shoot()
             self.last_shot = now
-            
+    
     def shoot(self):
         if self.enemy_type == "basic":
             bullet = EnemyBullet(self.rect.centerx, self.rect.bottom, self)
@@ -708,14 +943,85 @@ class Enemy(pygame.sprite.Sprite):
             self.bullets.append(bullet)  # Track this bullet
         elif self.enemy_type == "elite":
             for angle in range(-30, 31, 60):  # Changed from 30 to 60 (fewer bullets)
-                bullet = EnemySpreadBullet(self.rect.centerx, self.rect.bottom, angle, self)
+                bullet = EnemySpreadBullet(
+                    self.rect.centerx,   # x
+                    self.rect.bottom,    # y
+                    angle,               # angle
+                    self,                # owner
+                    PURPLE,              # color
+                    8,                   # size
+                    15,                  # damage
+                    6                    # speed
+                )
                 all_sprites.add(bullet)
                 enemy_bullets.add(bullet)
                 self.bullets.append(bullet)  # Track this bullet
                 
+        elif self.enemy_type == "cloaked_ambusher":
+            self.shoot_cloaked_ambusher()
+        elif self.enemy_type == "splitter_drone":
+            self.shoot_splitter_drone()
+        elif self.enemy_type == "shield_bearer":
+            self.shoot_shield_bearer()
+        elif self.enemy_type == "energy_sapper":
+            self.shoot_energy_sapper()
+        elif self.enemy_type == "blade_spinner":
+            self.shoot_blade_spinner()
+    
     def hit(self, damage):
+        # For shield bearer, check if shield is active
+        if self.enemy_type == "shield_bearer" and self.shield_active:
+            self.shield_health -= damage
+            # Only take damage if shield is down
+            if self.shield_health <= 0:
+                self.shield_active = False
+            return 0  # No score for hitting shield
+            
+        # For blade spinner with reflective ability
+        if self.enemy_type == "blade_spinner" and self.reflect_bullets and random.random() < 0.4:
+            # 40% chance to reflect bullets in hard mode
+            angle = random.randint(0, 360)
+            reflected = EnemySpreadBullet(
+                self.rect.centerx,   # x
+                self.rect.centery,   # y
+                angle,               # angle
+                self,                # owner
+                (255, 200, 0),       # color (brighter orange)
+                8,                   # size
+                15,                  # damage
+                6                    # speed
+            )
+            all_sprites.add(reflected)
+            enemy_bullets.add(reflected)
+            self.bullets.append(reflected)
+            return 0  # No score for reflected hits
+        
+        # Normal damage handling
         self.health -= damage
         if self.health <= 0:
+            # Special case for splitter drone
+            if self.enemy_type == "splitter_drone" and not self.is_split:
+                # Create 2-3 smaller split drones
+                num_splits = 2
+                if game_state.difficulty == "hard":
+                    num_splits = 3
+                    
+                for _ in range(num_splits):
+                    # Create smaller split drone
+                    split = Enemy("splitter_drone")
+                    split.is_split = True  # Mark as a split version
+                    split.health = self.health // 2  # Half health
+                    split.rect.centerx = self.rect.centerx + random.randint(-20, 20)
+                    split.rect.centery = self.rect.centery
+                    split.speed = self.speed * 1.5  # Faster
+                    # Make it smaller
+                    split.image = pygame.Surface((25, 25), pygame.SRCALPHA)
+                    pygame.draw.circle(split.image, (0, 200, 200), (12, 12), 12)  # Brighter teal
+                    split.rect = split.image.get_rect(center=split.rect.center)
+                    
+                    all_sprites.add(split)
+                    enemies.add(split)
+            
             # Destroy all bullets fired by this enemy
             for bullet in self.bullets[:]:  # Use a copy of the list to safely iterate
                 bullet.kill()
@@ -730,6 +1036,84 @@ class Enemy(pygame.sprite.Sprite):
             self.kill()
             return self.score_value
         return 0
+
+    def shoot_cloaked_ambusher(self):
+        # Fast smaller bullets in a burst
+        bullet = EnemyBullet(self.rect.centerx, self.rect.bottom, self)
+        bullet.speedy = 7  # Faster than normal
+        bullet.image = pygame.Surface((3, 10))
+        bullet.image.fill((150, 150, 255))  # Light blue
+        all_sprites.add(bullet)
+        enemy_bullets.add(bullet)
+        self.bullets.append(bullet)
+        
+    def shoot_splitter_drone(self):
+        # Shoots a single bullet straight down
+        bullet = EnemyBullet(self.rect.centerx, self.rect.bottom, self)
+        all_sprites.add(bullet)
+        enemy_bullets.add(bullet)
+        self.bullets.append(bullet)
+        
+    def shoot_shield_bearer(self):
+        # Shoots bullets in 3 directions
+        for angle in [-30, 0, 30]:
+            bullet = EnemySpreadBullet(
+                self.rect.centerx,   # x
+                self.rect.bottom,    # y
+                angle,               # angle
+                self,                # owner
+                PURPLE,              # color
+                8,                   # size
+                15,                  # damage
+                6                    # speed
+            )
+            all_sprites.add(bullet)
+            enemy_bullets.add(bullet)
+            self.bullets.append(bullet)
+            
+    def shoot_energy_sapper(self):
+        # Doesn't shoot regular bullets when beam is active
+        if not self.beam_active:
+            # Shoot a slow, large bullet
+            bullet = EnemyBullet(self.rect.centerx, self.rect.bottom, self)
+            bullet.speedy = 3  # Slower
+            bullet.image = pygame.Surface((10, 20))
+            bullet.image.fill((200, 100, 200))  # Pink-purple
+            bullet.damage = 10  # More damage
+            all_sprites.add(bullet)
+            enemy_bullets.add(bullet)
+            self.bullets.append(bullet)
+            
+    def shoot_blade_spinner(self):
+        if pygame.time.get_ticks() - self.last_shot > self.shoot_delay:
+            self.last_shot = pygame.time.get_ticks()
+            
+            # Create multiple bullets in a spiral pattern
+            num_bullets = 4
+            for i in range(num_bullets):
+                # Create a bullet with spiral properties
+                bullet = EnemySpreadBullet(
+                    self.rect.centerx,          # x
+                    self.rect.centery,          # y
+                    0,                          # angle
+                    self,                       # owner
+                    (255, 100, 100),            # color (reddish)
+                    10,                         # size
+                    15,                         # damage
+                    6                           # speed
+                )
+                
+                # Add spiral properties
+                bullet.spiral = True
+                bullet.spiral_angle = (i * (2 * math.pi / num_bullets))  # Start at evenly spaced angles
+                bullet.spiral_speed = 0.05  # Rotation speed
+                bullet.spiral_radius = 5    # Initial radius
+                bullet.base_x = float(bullet.rect.centerx)  # Store base position for spiral calculation
+                bullet.base_y = float(bullet.rect.centery)
+                
+                all_sprites.add(bullet)
+                enemy_bullets.add(bullet)
+                self.bullets.append(bullet)
 
 # Enemy bullet classes
 class EnemyBullet(pygame.sprite.Sprite):
@@ -755,22 +1139,45 @@ class EnemyBullet(pygame.sprite.Sprite):
                 self.owner.bullets.remove(self)
 
 class EnemySpreadBullet(pygame.sprite.Sprite):
-    def __init__(self, x, y, angle, owner=None):
+    def __init__(self, x, y, angle, owner=None, color=PURPLE, size=8, damage=15, speed=6):
         pygame.sprite.Sprite.__init__(self)
-        self.image = pygame.Surface((8, 8))
-        self.image.fill(PURPLE)
+        self.image = pygame.Surface((size, size))
+        self.image.fill(color)
         self.rect = self.image.get_rect()
         self.rect.centerx = x
         self.rect.top = y
         self.angle = math.radians(angle)
-        self.speedy = 6 * math.cos(self.angle)
-        self.speedx = 6 * math.sin(self.angle)
-        self.damage = 15
+        self.speed = speed
+        self.speedy = speed * math.cos(self.angle)
+        self.speedx = speed * math.sin(self.angle)
+        self.damage = damage
         self.owner = owner  # Store reference to the enemy that fired this bullet
+        # Initialize spiral properties (will be set later if needed)
+        self.spiral = False
         
     def update(self):
+        # Normal movement
         self.rect.y += self.speedy
         self.rect.x += self.speedx
+        
+        # Special spiral motion for blade spinner projectiles
+        if hasattr(self, 'spiral') and self.spiral:
+            self.spiral_angle += self.spiral_speed
+            # Calculate spiral offset
+            spiral_x = math.cos(self.spiral_angle) * self.spiral_radius
+            spiral_y = math.sin(self.spiral_angle) * self.spiral_radius
+            
+            # Update base position with regular movement
+            self.base_x += self.speedx
+            self.base_y += self.speedy
+            
+            # Set actual position with spiral offset
+            self.rect.centerx = int(self.base_x + spiral_x)
+            self.rect.centery = int(self.base_y + spiral_y)
+            
+            # Gradually increase spiral radius for expanding effect
+            self.spiral_radius += 0.1
+        
         # Kill if it moves off the screen
         if self.rect.bottom < 0 or self.rect.top > HEIGHT or self.rect.left > WIDTH or self.rect.right < 0:
             self.kill()
@@ -962,16 +1369,32 @@ class Boss(pygame.sprite.Sprite):
         if self.pattern == 0:
             # Simple spread pattern
             for angle in range(-45, 46, 15):
-                bullet = EnemySpreadBullet(self.rect.centerx, self.rect.bottom, angle, self)
+                bullet = EnemySpreadBullet(
+                    self.rect.centerx,   # x
+                    self.rect.bottom,    # y
+                    angle,               # angle
+                    self,                # owner
+                    PURPLE,              # color
+                    8,                   # size
+                    15,                  # damage
+                    6                    # speed
+                )
                 all_sprites.add(bullet)
                 enemy_bullets.add(bullet)
                 self.bullets.append(bullet)  # Track this bullet
         elif self.pattern == 1:
             # Circular pattern
             for angle in range(0, 360, 30):
-                bullet = EnemySpreadBullet(self.rect.centerx, self.rect.centery, angle, self)
-                bullet.speedy = 6 * math.cos(math.radians(angle))
-                bullet.speedx = 6 * math.sin(math.radians(angle))
+                bullet = EnemySpreadBullet(
+                    self.rect.centerx,   # x
+                    self.rect.centery,   # y
+                    angle,               # angle
+                    self,                # owner
+                    PURPLE,              # color
+                    8,                   # size
+                    15,                  # damage
+                    6                    # speed
+                )
                 all_sprites.add(bullet)
                 enemy_bullets.add(bullet)
                 self.bullets.append(bullet)  # Track this bullet
@@ -980,7 +1403,16 @@ class Boss(pygame.sprite.Sprite):
             angle = math.degrees(math.atan2(player.rect.centery - self.rect.centery, 
                                             player.rect.centerx - self.rect.centerx))
             for i in range(-2, 3):
-                bullet = EnemySpreadBullet(self.rect.centerx, self.rect.bottom, angle + (i * 10) + 90, self)
+                bullet = EnemySpreadBullet(
+                    self.rect.centerx,   # x
+                    self.rect.bottom,    # y
+                    angle + (i * 10) + 90,  # angle
+                    self,                # owner
+                    PURPLE,              # color
+                    8,                   # size
+                    15,                  # damage
+                    6                    # speed
+                )
                 all_sprites.add(bullet)
                 enemy_bullets.add(bullet)
                 self.bullets.append(bullet)  # Track this bullet
@@ -1670,12 +2102,31 @@ while running:
             else:
                 # Spawn more enemies
                 for i in range(game_state.wave_enemies):
-                    if random.random() < 0.3:  # 30% chance of elite enemy
+                    enemy_roll = random.random()
+                    
+                    # Use a weighted selection system for different enemy types
+                    if enemy_roll < 0.15:  # 15% chance of elite enemy
                         enemy = Enemy("elite")
-                    else:
+                    elif enemy_roll < 0.25:  # 10% chance of cloaked ambusher
+                        enemy = Enemy("cloaked_ambusher")
+                    elif enemy_roll < 0.35:  # 10% chance of splitter drone
+                        enemy = Enemy("splitter_drone")
+                    elif enemy_roll < 0.45:  # 10% chance of shield bearer
+                        enemy = Enemy("shield_bearer")
+                    elif enemy_roll < 0.55:  # 10% chance of energy sapper
+                        enemy = Enemy("energy_sapper")
+                    elif enemy_roll < 0.65:  # 10% chance of blade spinner
+                        enemy = Enemy("blade_spinner")
+                    else:  # 35% chance of basic enemy
                         enemy = Enemy("basic")
                     all_sprites.add(enemy)
                     enemies.add(enemy)
+                
+                # Chance to spawn a mini-boss (Barrier Goliath) after wave 3
+                if game_state.wave > 3 and game_state.wave < game_state.waves_per_sector and random.random() < 0.15:  # 15% chance per wave after wave 3
+                    mini_boss = BarrierGoliath(WIDTH, HEIGHT, game_state, all_sprites, enemies, enemy_bullets, powerups, PowerUp, EnemySpreadBullet)
+                    all_sprites.add(mini_boss)
+                    enemies.add(mini_boss)
     
     # Draw / render
     screen.fill(BLACK)
@@ -1770,12 +2221,31 @@ while running:
             else:
                 # Spawn more enemies
                 for i in range(game_state.wave_enemies):
-                    if random.random() < 0.3:  # 30% chance of elite enemy
+                    enemy_roll = random.random()
+                    
+                    # Use a weighted selection system for different enemy types
+                    if enemy_roll < 0.15:  # 15% chance of elite enemy
                         enemy = Enemy("elite")
-                    else:
+                    elif enemy_roll < 0.25:  # 10% chance of cloaked ambusher
+                        enemy = Enemy("cloaked_ambusher")
+                    elif enemy_roll < 0.35:  # 10% chance of splitter drone
+                        enemy = Enemy("splitter_drone")
+                    elif enemy_roll < 0.45:  # 10% chance of shield bearer
+                        enemy = Enemy("shield_bearer")
+                    elif enemy_roll < 0.55:  # 10% chance of energy sapper
+                        enemy = Enemy("energy_sapper")
+                    elif enemy_roll < 0.65:  # 10% chance of blade spinner
+                        enemy = Enemy("blade_spinner")
+                    else:  # 35% chance of basic enemy
                         enemy = Enemy("basic")
                     all_sprites.add(enemy)
                     enemies.add(enemy)
+                
+                # Chance to spawn a mini-boss (Barrier Goliath) after wave 3
+                if game_state.wave > 3 and game_state.wave < game_state.waves_per_sector and random.random() < 0.15:  # 15% chance per wave after wave 3
+                    mini_boss = BarrierGoliath(WIDTH, HEIGHT, game_state, all_sprites, enemies, enemy_bullets, powerups, PowerUp, EnemySpreadBullet)
+                    all_sprites.add(mini_boss)
+                    enemies.add(mini_boss)
             
         # Draw portal special effects and text
         for portal in shop_portals:

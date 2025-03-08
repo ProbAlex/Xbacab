@@ -36,6 +36,13 @@ A pygame implementation of a vertical scrolling space shooter game with multiple
 - **Combat System**
   - Basic Enemies: Small ships with simple attacks
   - Elite Enemies: Larger, tougher ships with more complex attack patterns
+  - Specialized Enemy Types:
+    - Cloaked Ambusher: Becomes invisible and unleashes burst attacks
+    - Splitter Drone: Splits into smaller drones when destroyed
+    - Shield Bearer: Protected by regenerating shields
+    - Energy Sapper: Drains player energy with a beam weapon
+    - Blade Spinner: Rotates and fires spiral projectiles
+  - Mini-Boss: Barrier Goliath with protective barriers and shield system
   - Boss Fights: Unique boss encounters at the end of each sector
   - Combo System: Destroy enemies in succession to increase your score multiplier
   - Enemy projectiles despawn when their source is destroyed
