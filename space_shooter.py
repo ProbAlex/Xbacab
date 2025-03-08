@@ -10,17 +10,28 @@ os.environ['SDL_AUDIODRIVER'] = 'dummy'  # This uses a dummy audio driver
 
 # Initialize pygame
 pygame.init()
+pygame.mixer.init()  # Initialize sound mixer
 
-# Try initializing audio with fallback options
-try:
-    pygame.mixer.init()
-except pygame.error:
-    print("Warning: Audio could not be initialized, game will run without sound")
+# Get the user's screen info for proper fullscreen
+screen_info = pygame.display.Info()
+SCREEN_WIDTH = screen_info.current_w
+SCREEN_HEIGHT = screen_info.current_h
 
-# Game constants
+# Game design constants (internal resolution)
 WIDTH = 800
 HEIGHT = 900
 FPS = 60
+
+# Calculate centering offset for gameplay elements
+OFFSET_X = (SCREEN_WIDTH - WIDTH) // 2
+OFFSET_Y = (SCREEN_HEIGHT - HEIGHT) // 2
+
+# Create fullscreen display at native resolution
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.FULLSCREEN)
+pygame.display.set_caption("Xbacab")
+clock = pygame.time.Clock()
+
+# Colors
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 RED = (255, 0, 0)
@@ -28,11 +39,6 @@ GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
 YELLOW = (255, 255, 0)
 PURPLE = (128, 0, 128)
-
-# Create the game window
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Space Fighter")
-clock = pygame.time.Clock()
 
 # Load game assets
 def load_image(name, scale=1):
@@ -60,15 +66,35 @@ class Player(pygame.sprite.Sprite):
         self.image = pygame.Surface((50, 40), pygame.SRCALPHA)
         pygame.draw.polygon(self.image, BLUE, [(0, 40), (25, 0), (50, 40)])
         self.rect = self.image.get_rect()
+        # Position player within the original game coordinates (no offset)
         self.rect.centerx = WIDTH // 2
         self.rect.bottom = HEIGHT - 20
         self.speedx = 0
         self.speedy = 0
-        self.health = 150
-        self.max_health = 150
-        self.energy = 100
-        self.max_energy = 100
-        self.energy_regen = 0.5
+        
+        # Adjust stats based on difficulty
+        if game_state.difficulty == "easy":
+            self.health = 200
+            self.max_health = 200
+            self.energy = 150
+            self.max_energy = 150
+            self.energy_regen = 0.7
+            self.max_drones = 6  # More drones on easy
+        elif game_state.difficulty == "normal":
+            self.health = 150
+            self.max_health = 150
+            self.energy = 100
+            self.max_energy = 100
+            self.energy_regen = 0.5
+            self.max_drones = 4  # Standard drones
+        elif game_state.difficulty == "hard":
+            self.health = 100
+            self.max_health = 100
+            self.energy = 80
+            self.max_energy = 80
+            self.energy_regen = 0.3
+            self.max_drones = 3  # Fewer drones on hard
+        
         self.shield_active = False
         self.shield_strength = 50
         self.shoot_delay = 200
@@ -84,7 +110,6 @@ class Player(pygame.sprite.Sprite):
         self.weapon_level = 1
         self.weapon_type = "normal"  # normal, spread, laser, homing
         self.drones = 0
-        self.max_drones = 2
         self.drone_list = []
         # Add dying state
         self.dying = False
@@ -105,14 +130,26 @@ class Player(pygame.sprite.Sprite):
             else:
                 self.visible = False
                 
+            # Check if dying animation is complete
             if now - self.dying_start > self.dying_duration:
-                self.kill()
-                return
-                
+                return True  # Player is fully dead
+            return False  # Still in dying animation
+            
+        # Natural health regeneration in easy mode
+        if game_state.difficulty == "easy":
+            self.health = min(self.max_health, self.health + 0.02)  # Slowly regenerate health
+            
+        # Update keyboard controls
+        keystate = pygame.key.get_pressed()
+        # Update energy
+        if self.shield_active:
+            self.energy -= 0.5
+            if self.energy <= 0:
+                self.shield_active = False
+        
         # Movement
         self.speedx = 0
         self.speedy = 0
-        keystate = pygame.key.get_pressed()
         
         # Regular movement
         speed_factor = 2.5 if self.hyper_dash_active else 1
@@ -131,15 +168,15 @@ class Player(pygame.sprite.Sprite):
         self.rect.x += self.speedx
         self.rect.y += self.speedy
         
-        # Keep player on screen
+        # Keep the player within bounds of the screen
         if self.rect.right > WIDTH:
             self.rect.right = WIDTH
         if self.rect.left < 0:
             self.rect.left = 0
-        if self.rect.top < 0:
-            self.rect.top = 0
         if self.rect.bottom > HEIGHT:
             self.rect.bottom = HEIGHT
+        if self.rect.top < 0:
+            self.rect.top = 0
             
         # Automatically shoot
         now = pygame.time.get_ticks()
@@ -187,7 +224,13 @@ class Player(pygame.sprite.Sprite):
                 
             # Drones also shoot normal bullets
             for drone in self.drone_list:
-                drone.shoot()
+                # 50% chance to fire a bouncing bullet instead of normal
+                if random.random() < 0.5 and game_state.difficulty != "hard":
+                    bouncing_bullet = BouncingBullet(drone.rect.centerx, drone.rect.top)
+                    all_sprites.add(bouncing_bullet)
+                    bullets.add(bouncing_bullet)
+                else:
+                    drone.shoot()
                 
         elif self.weapon_type == "spread":
             for angle in range(-30, 31, 30):
@@ -197,7 +240,13 @@ class Player(pygame.sprite.Sprite):
                 
             # Drones also shoot spread bullets
             for drone in self.drone_list:
-                drone.shoot()
+                # 50% chance to fire a bouncing bullet instead of spread
+                if random.random() < 0.5 and game_state.difficulty != "hard":
+                    bouncing_bullet = BouncingBullet(drone.rect.centerx, drone.rect.top)
+                    all_sprites.add(bouncing_bullet)
+                    bullets.add(bouncing_bullet)
+                else:
+                    drone.shoot()
                 
         elif self.weapon_type == "bouncing":
             # Create a bouncing bullet that targets enemies
@@ -244,16 +293,35 @@ class Drone(pygame.sprite.Sprite):
         pygame.draw.circle(self.image, BLUE, (10, 10), 10)
         self.rect = self.image.get_rect()
         self.player = player
-        self.position = position  # 0 for left, 1 for right
+        self.position = position  # Index in drone list
         
     def update(self, *args):
-        # Position the drone relative to the player without needing player parameter
-        if self.position == 0:
-            self.rect.right = self.player.rect.left - 10
-        else:
-            self.rect.left = self.player.rect.right + 10
-        self.rect.centery = self.player.rect.centery
+        # Position drones in formation around the player
+        # For up to 4 drones, place them in cardinal positions
+        # For more than 4, place them in circular formation
         
+        if len(self.player.drone_list) <= 4:
+            # Simple formation for 1-4 drones
+            if self.position == 0:  # Left
+                self.rect.right = self.player.rect.left - 15
+                self.rect.centery = self.player.rect.centery
+            elif self.position == 1:  # Right
+                self.rect.left = self.player.rect.right + 15
+                self.rect.centery = self.player.rect.centery
+            elif self.position == 2:  # Top
+                self.rect.centerx = self.player.rect.centerx
+                self.rect.bottom = self.player.rect.top - 15
+            elif self.position == 3:  # Bottom
+                self.rect.centerx = self.player.rect.centerx
+                self.rect.top = self.player.rect.bottom + 15
+        else:
+            # Circular formation for 5+ drones
+            angle = (360 / len(self.player.drone_list)) * self.position
+            radius = 50  # Distance from player
+            rad_angle = math.radians(angle)
+            self.rect.centerx = self.player.rect.centerx + int(math.sin(rad_angle) * radius)
+            self.rect.centery = self.player.rect.centery - int(math.cos(rad_angle) * radius)
+
     def shoot(self):
         # Get the player's current weapon type
         if self.player.weapon_type == "normal":
@@ -453,16 +521,30 @@ class Enemy(pygame.sprite.Sprite):
         pygame.sprite.Sprite.__init__(self)
         self.enemy_type = enemy_type
         
-        # Base speed calculation - scales with game sector
-        base_min_speed = 2 + (game_state.sector - 1) * 0.5
-        base_max_speed = 5 + (game_state.sector - 1) * 0.5
+        # Base speed calculation - scales with game sector and difficulty
+        difficulty_multiplier = {
+            "easy": 0.8,
+            "normal": 1.0,
+            "hard": 1.3
+        }[game_state.difficulty]
+        
+        base_min_speed = (2 + (game_state.sector - 1) * 0.5) * difficulty_multiplier
+        base_max_speed = (5 + (game_state.sector - 1) * 0.5) * difficulty_multiplier
         
         if enemy_type == "basic":
             self.image = pygame.Surface((40, 40), pygame.SRCALPHA)
             pygame.draw.polygon(self.image, RED, [(0, 0), (40, 0), (20, 40)])
             self.rect = self.image.get_rect()
-            self.health = 10  # Reduced for easier gameplay
-            self.speed = random.uniform(base_min_speed, base_max_speed)  # Speed scales with sector
+            
+            # Adjust health based on difficulty
+            if game_state.difficulty == "easy":
+                self.health = 8
+            elif game_state.difficulty == "normal":
+                self.health = 10
+            else:  # hard
+                self.health = 15
+                
+            self.speed = random.uniform(base_min_speed, base_max_speed)  # Speed scales with sector and difficulty
             self.shoot_delay = 2000  # Base delay
             self.score_value = 10
             
@@ -470,11 +552,19 @@ class Enemy(pygame.sprite.Sprite):
             self.image = pygame.Surface((60, 60), pygame.SRCALPHA)
             pygame.draw.polygon(self.image, PURPLE, [(0, 0), (60, 0), (30, 60)])
             self.rect = self.image.get_rect()
-            self.health = 50
+            
+            # Adjust health based on difficulty
+            if game_state.difficulty == "easy":
+                self.health = 40
+            elif game_state.difficulty == "normal":
+                self.health = 50
+            else:  # hard
+                self.health = 70
+                
             self.speed = random.uniform(base_min_speed, base_max_speed)
             self.shoot_delay = 1000  # Base delay
             self.score_value = 25  # Elite enemies are worth more points
-            
+        
         # Add random offset to shoot delay to prevent synchronized firing
         self.shoot_delay += random.randint(-500, 500)
         
@@ -608,11 +698,16 @@ class PowerUp(pygame.sprite.Sprite):
         elif self.type == "shield":
             player.energy = player.max_energy
         elif self.type == "weapon":
-            weapon_types = ["normal", "spread", "bouncing"]
+            # Define weapon types based on difficulty
+            if game_state.difficulty == "hard":
+                weapon_types = ["normal", "spread"]  # No bouncing bullets in hard mode
+            else:
+                weapon_types = ["normal", "spread", "bouncing"]
+                
             if player.weapon_level < 3:
                 player.weapon_level += 1
             else:
-                idx = weapon_types.index(player.weapon_type)
+                idx = weapon_types.index(player.weapon_type) if player.weapon_type in weapon_types else 0
                 player.weapon_type = weapon_types[(idx + 1) % len(weapon_types)]
                 player.weapon_level = 1
         elif self.type == "drone":
@@ -634,50 +729,58 @@ class Boss(pygame.sprite.Sprite):
         # Track boss bullets
         self.bullets = []
         
+        # Difficulty multipliers
+        difficulty_multipliers = {
+            "easy": 0.8,
+            "normal": 1.0, 
+            "hard": 1.5
+        }
+        difficulty_mult = difficulty_multipliers[game_state.difficulty]
+        
         # Boss visuals and stats based on sector
         if sector == 1:
             # Nova Prime Edge Boss
             self.image = pygame.Surface((100, 100), pygame.SRCALPHA)
             pygame.draw.polygon(self.image, RED, [(0, 0), (100, 0), (100, 100), (50, 75), (0, 100)])
-            self.max_health = 500
-            self.shoot_delay = 800
+            self.max_health = int(500 * difficulty_mult)
+            self.shoot_delay = int(800 / difficulty_mult)  # Shorter delay = faster shooting on higher difficulties
             self.name = "Sector 1 - Edge Guardian"
         elif sector == 2:
             # Asteroid Field Anomaly
             self.image = pygame.Surface((120, 120), pygame.SRCALPHA)
             pygame.draw.circle(self.image, (150, 75, 0), (60, 60), 60)
-            self.max_health = 800
-            self.shoot_delay = 700
+            self.max_health = int(800 * difficulty_mult)
+            self.shoot_delay = int(700 / difficulty_mult)
             self.name = "Sector 2 - Asteroid Titan"
         elif sector == 3:
             # Rhovax Border Patrol
             self.image = pygame.Surface((150, 100), pygame.SRCALPHA)
             pygame.draw.polygon(self.image, (150, 0, 150), [(0, 50), (75, 0), (150, 50), (75, 100)])
-            self.max_health = 1200
-            self.shoot_delay = 600
+            self.max_health = int(1200 * difficulty_mult)
+            self.shoot_delay = int(600 / difficulty_mult)
             self.name = "Sector 3 - Rhovax Dreadnought"
         elif sector == 4:
             # Dominion Shipyards
             self.image = pygame.Surface((160, 160), pygame.SRCALPHA)
             pygame.draw.rect(self.image, (0, 100, 200), (0, 0, 160, 160))
             pygame.draw.rect(self.image, (0, 0, 0), (30, 30, 100, 100))
-            self.max_health = 2000
-            self.shoot_delay = 500
+            self.max_health = int(2000 * difficulty_mult)
+            self.shoot_delay = int(500 / difficulty_mult)
             self.name = "Sector 4 - Shipyard Sentinel"
         elif sector == 5:
             # Cosmic Storm Nexus
             self.image = pygame.Surface((180, 150), pygame.SRCALPHA)
             pygame.draw.ellipse(self.image, (50, 50, 200), (0, 0, 180, 150))
             pygame.draw.ellipse(self.image, (100, 0, 100), (30, 30, 120, 90))
-            self.max_health = 3000
-            self.shoot_delay = 400
+            self.max_health = int(3000 * difficulty_mult)
+            self.shoot_delay = int(400 / difficulty_mult)
             self.name = "Sector 5 - Storm Lord"
         else:  # Sector 6 - Final Boss
             # Dominion Mothership
             self.image = pygame.Surface((200, 200), pygame.SRCALPHA)
             pygame.draw.polygon(self.image, (200, 0, 0), [(0, 0), (200, 0), (160, 100), (200, 200), (0, 200), (40, 100)])
-            self.max_health = 5000
-            self.shoot_delay = 300
+            self.max_health = int(5000 * difficulty_mult)
+            self.shoot_delay = int(300 / difficulty_mult)
             self.name = "Sector 6 - Dominion Mothership"
             
         self.rect = self.image.get_rect()
@@ -876,7 +979,7 @@ class GameState:
         self.high_score = 0
         self.combo = 1
         self.max_combo = 1
-        self.difficulty = "normal"
+        self.difficulty = "normal"  # normal, easy, hard
         self.resources = 0
         self.boss_fight = False
         self.wave_enemies = 5  # Reduced from 8 for easier start
@@ -960,6 +1063,156 @@ def draw_bar(surface, x, y, value, max_value, width, height, color):
     pygame.draw.rect(surface, color, fill_rect)
     pygame.draw.rect(surface, WHITE, outline_rect, 2)
 
+# Function to draw a button and check if it's clicked
+def draw_button(surface, text, size, x, y, width, height, color=BLUE, hover_color=GREEN, text_color=WHITE):
+    # Get mouse position and adjust for offset if we're drawing to gameplay_surface
+    mouse_pos = pygame.mouse.get_pos()
+    is_gameplay_surface = surface is not screen
+    
+    # If we're drawing to gameplay_surface (not the main screen), adjust mouse coordinates
+    if is_gameplay_surface:
+        mouse_pos = (mouse_pos[0] - OFFSET_X, mouse_pos[1] - OFFSET_Y)
+    
+    button_rect = pygame.Rect(x - width//2, y - height//2, width, height)
+    clicked = False
+    
+    # Check if mouse is over button
+    if button_rect.collidepoint(mouse_pos):
+        # Draw hover state
+        pygame.draw.rect(surface, hover_color, button_rect, border_radius=10)
+        # Check for click
+        if pygame.mouse.get_pressed()[0]:  # Left mouse button pressed
+            clicked = True
+    else:
+        # Draw normal state
+        pygame.draw.rect(surface, color, button_rect, border_radius=10)
+    
+    # Draw button text
+    draw_text(surface, text, size, x, y, text_color)
+    
+    # Draw button border
+    pygame.draw.rect(surface, WHITE, button_rect, 2, border_radius=10)
+    
+    return clicked
+
+# Function to show controls screen
+def show_controls_screen():
+    controls_running = True
+    
+    while controls_running:
+        clock.tick(FPS)
+        
+        # Handle events
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == KEYDOWN:
+                if event.key == K_ESCAPE:
+                    controls_running = False
+        
+        # Draw controls screen
+        screen.fill(BLACK)
+        
+        # Create a gameplay surface
+        controls_surface = pygame.Surface((WIDTH, HEIGHT))
+        controls_surface.fill(BLACK)
+        
+        draw_text(controls_surface, "CONTROLS", 50, WIDTH/2, 80)
+        
+        controls = [
+            "Movement: WASD or Arrow Keys",
+            "Shoot: SPACE or Left Mouse Button",
+            "Shield: E key",
+            "Hyper Dash: SHIFT key",
+            "Pause: ESC key",
+            "Enter Shop: E key (when next to shop portal)",
+            "Select Items: Arrow Keys / WASD and ENTER",
+            "Exit Menus: ESC key"
+        ]
+        
+        y_pos = 160
+        for control in controls:
+            draw_text(controls_surface, control, 24, WIDTH/2, y_pos)
+            y_pos += 40
+        
+        # Back button
+        if draw_button(controls_surface, "Back to Menu", 24, WIDTH/2, HEIGHT-80, 200, 50):
+            controls_running = False
+            
+        # Draw the controls surface to the screen with offsets
+        screen.blit(controls_surface, (OFFSET_X, OFFSET_Y))
+        pygame.display.flip()
+
+# Function to show difficulty selection screen
+def show_difficulty_screen():
+    difficulty_running = True
+    selected_difficulty = game_state.difficulty
+    
+    while difficulty_running:
+        clock.tick(FPS)
+        
+        # Handle events
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == KEYDOWN:
+                if event.key == K_ESCAPE:
+                    difficulty_running = False
+        
+        # Draw difficulty screen
+        screen.fill(BLACK)
+        
+        # Create a gameplay surface
+        difficulty_surface = pygame.Surface((WIDTH, HEIGHT))
+        difficulty_surface.fill(BLACK)
+        
+        draw_text(difficulty_surface, "SELECT DIFFICULTY", 50, WIDTH/2, 80)
+        
+        # Description based on difficulty
+        descriptions = {
+            "easy": "More health, slower enemies, more resources",
+            "normal": "Standard challenge",
+            "hard": "Less health, faster enemies, tougher bosses"
+        }
+        
+        # Difficulty buttons
+        button_width = 200
+        button_height = 60
+        button_y = 200
+        spacing = 100
+        
+        # Easy button
+        easy_color = GREEN if selected_difficulty == "easy" else BLUE
+        if draw_button(difficulty_surface, "Easy", 30, WIDTH/2, button_y, button_width, button_height, easy_color):
+            selected_difficulty = "easy"
+            
+        # Normal button
+        normal_color = GREEN if selected_difficulty == "normal" else BLUE
+        if draw_button(difficulty_surface, "Normal", 30, WIDTH/2, button_y + spacing, button_width, button_height, normal_color):
+            selected_difficulty = "normal"
+            
+        # Hard button
+        hard_color = GREEN if selected_difficulty == "hard" else BLUE
+        if draw_button(difficulty_surface, "Hard", 30, WIDTH/2, button_y + spacing*2, button_width, button_height, hard_color):
+            selected_difficulty = "hard"
+        
+        # Show description of selected difficulty
+        draw_text(difficulty_surface, descriptions[selected_difficulty], 24, WIDTH/2, button_y + spacing*3)
+        
+        # Back and Confirm buttons
+        if draw_button(difficulty_surface, "Back", 24, WIDTH/3, HEIGHT-80, 150, 50):
+            difficulty_running = False
+            
+        if draw_button(difficulty_surface, "Confirm", 24, WIDTH*2/3, HEIGHT-80, 150, 50):
+            game_state.difficulty = selected_difficulty
+            difficulty_running = False
+        
+        # Draw the difficulty surface to the screen with offsets
+        screen.blit(difficulty_surface, (OFFSET_X, OFFSET_Y))
+        pygame.display.flip()
+
 # Initialize game state and sprite groups
 game_state = GameState()
 all_sprites = pygame.sprite.Group()
@@ -996,6 +1249,8 @@ def show_upgrade_menu():
     while upgrade_running:
         clock.tick(FPS)
         mouse_pos = pygame.mouse.get_pos()
+        # Adjust mouse position for gameplay surface
+        adjusted_mouse_pos = (mouse_pos[0] - OFFSET_X, mouse_pos[1] - OFFSET_Y)
         
         # Create upgrade options dynamically
         upgrade_options = [
@@ -1038,7 +1293,7 @@ def show_upgrade_menu():
                 if event.button == 1:  # Left mouse button
                     # Check if click is on an option
                     for i, rect in enumerate(option_rects):
-                        if rect.collidepoint(mouse_pos):
+                        if rect.collidepoint(adjusted_mouse_pos):
                             if i < len(upgrade_options):  # Make sure the option exists
                                 apply_upgrade(upgrade_options[i])
                                 break
@@ -1046,8 +1301,12 @@ def show_upgrade_menu():
         # Draw upgrade menu
         screen.fill(BLACK)
         
-        draw_text(screen, "UPGRADE MENU", 40, WIDTH / 2, 30)
-        draw_text(screen, f"Resources: {game_state.resources}", 25, WIDTH / 2, 80)
+        # Create a gameplay surface
+        upgrade_surface = pygame.Surface((WIDTH, HEIGHT))
+        upgrade_surface.fill(BLACK)
+        
+        draw_text(upgrade_surface, "UPGRADE MENU", 40, WIDTH / 2, 30)
+        draw_text(upgrade_surface, f"Resources: {game_state.resources}", 25, WIDTH / 2, 80)
         
         option_rects = []  # Reset the list
         for i, option in enumerate(upgrade_options):
@@ -1064,15 +1323,18 @@ def show_upgrade_menu():
             text = f"{highlight} {option['name']} (Cost: {option['cost']})"
             
             # Draw option and get its rect for mouse detection
-            text_rect = draw_text(screen, text, 20, WIDTH / 2, y_pos, color, return_rect=True)
+            text_rect = draw_text(upgrade_surface, text, 20, WIDTH / 2, y_pos, color, return_rect=True)
             option_rects.append(text_rect)
             
-            draw_text(screen, option["effect"], 16, WIDTH / 2, y_pos + 20, WHITE)
+            draw_text(upgrade_surface, option["effect"], 16, WIDTH / 2, y_pos + 20, WHITE)
             
-        draw_text(screen, "Arrow keys to select, ENTER to purchase, ESC to exit", 
+        draw_text(upgrade_surface, "Arrow keys to select, ENTER to purchase, ESC to exit", 
                 18, WIDTH / 2, HEIGHT - 50)
-        draw_text(screen, "You can also click on options with your mouse", 
+        draw_text(upgrade_surface, "You can also click on options with your mouse", 
                 18, WIDTH / 2, HEIGHT - 30)
+        
+        # Draw the upgrade surface to the screen with offsets
+        screen.blit(upgrade_surface, (OFFSET_X, OFFSET_Y))
         
         pygame.display.flip()
     
@@ -1123,113 +1385,46 @@ def cleanup_sprites():
                 sprite.rect.left > WIDTH + 100):
                 sprite.kill()
 
-# Game loop
+# Initialize game state
 running = True
+
+# Main game loop
 while running:
-    # Keep game running at the right speed
+    # Keep loop running at the right speed
     clock.tick(FPS)
-    
-    # Get mouse position for laser aiming
-    mouse_pos = pygame.mouse.get_pos()
-    if player is not None:  # Make sure player exists
-        player.mouse_pos = mouse_pos
     
     # Process input (events)
     for event in pygame.event.get():
-        # Check for closing window
         if event.type == QUIT:
             running = False
+        # Key press events
         elif event.type == KEYDOWN:
             if event.key == K_ESCAPE:
-                running = False
-            elif event.key == K_LSHIFT and game_state.state == "playing":
-                # SWAPPED: Shift now activates hyper dash
-                player.hyper_dash()
-        elif event.type == MOUSEBUTTONDOWN:
-            # Left click to shoot
-            if event.button == 1 and game_state.state == "playing":
-                now = pygame.time.get_ticks()
-                if now - player.last_shot > player.shoot_delay:
-                    player.shoot()
-                    player.last_shot = now
-    
-    if game_state.state == "playing":
-        # Check keyboard for shooting (space bar)
-        keystate = pygame.key.get_pressed()
-        if keystate[K_SPACE]:
-            now = pygame.time.get_ticks()
-            if now - player.last_shot > player.shoot_delay:
+                if game_state.state == "playing":
+                    game_state.state = "menu"
+                elif game_state.state == "menu":
+                    running = False
+            elif event.key == K_SPACE and game_state.state == "playing":
                 player.shoot()
-                player.last_shot = now
-    
-    # Update game state
+            elif event.key == K_LSHIFT and game_state.state == "playing":
+                player.hyper_dash()
+        # Mouse click events
+        elif event.type == MOUSEBUTTONDOWN:
+            if event.button == 1 and game_state.state == "playing":
+                player.shoot()
+
+    # Check mouse position for player aim direction
     if game_state.state == "playing":
-        # Update all sprites
+        player.mouse_pos = pygame.mouse.get_pos()
+        # Adjust the mouse position to the gameplay coordinates
+        player.mouse_pos = (player.mouse_pos[0] - OFFSET_X, player.mouse_pos[1] - OFFSET_Y)
+    
+    # Update all sprites for gameplay
+    if game_state.state == "playing":
         all_sprites.update()
         
-        # Draw player based on visibility (for dying animation)
-        if player.dying and not player.visible:
-            all_sprites.remove(player)
-        elif player.dying and player.visible and player not in all_sprites:
-            all_sprites.add(player)
-        
-        # Handle boss visibility for dying animation
-        for boss in bosses:
-            if boss.dying and not boss.visible:
-                all_sprites.remove(boss)
-            elif boss.dying and boss.visible and boss not in all_sprites:
-                all_sprites.add(boss)
-        
-        # Check for powerup collection
-        hits = pygame.sprite.spritecollide(player, powerups, True)
-        for powerup in hits:
-            powerup.apply_effect(player)
-            
-        # Check if enemy wave is cleared
-        if len(enemies) == 0 and not game_state.boss_fight:
-            if game_state.next_wave():
-                # Spawn boss for this sector
-                boss = Boss(game_state.sector)
-                all_sprites.add(boss)
-                bosses.add(boss)
-            else:
-                # Spawn new wave of enemies
-                for i in range(game_state.wave_enemies):
-                    if game_state.sector >= 3 and random.random() < 0.3:
-                        enemy = Enemy("elite")  # More elite enemies in later sectors
-                    else:
-                        enemy = Enemy("basic")
-                    all_sprites.add(enemy)
-                    enemies.add(enemy)
-                    
-        # Check for player interaction with shop portal
-        portal_hits = pygame.sprite.spritecollide(player, shop_portals, False)
-        if portal_hits:
-            # Show "Press E to enter shop" text
-            for portal in portal_hits:
-                # If player presses E while touching portal
-                keys = pygame.key.get_pressed()
-                if keys[K_e]:
-                    # Enter shop and remove the portal
-                    
-                    # Remove portals from both groups
-                    for portal in shop_portals:
-                        portal.kill()  # This removes it from all sprite groups
-                    shop_portals.empty()  # This is redundant but kept for safety
-                    
-                    # Clear any existing bullets to prevent issues after shop
-                    bullets.empty()  # Clear all player bullets
-                    
-                    # Show upgrade menu between sectors
-                    if game_state.next_sector():
-                        # Game completed!
-                        pass
-                    else:
-                        # Show upgrade menu
-                        show_upgrade_menu()
-                        
-                    # Double-check that portals are removed - redundant but kept for safety
-                    shop_portals.empty()
+        # Periodically remove sprites that are far off screen
+        cleanup_sprites()
         
         # Check for bullet hits on enemies
         hits = pygame.sprite.groupcollide(enemies, bullets, False, False)  # Changed to keep bullets
@@ -1240,7 +1435,7 @@ while running:
                     if enemy.health <= bullet.damage:
                         # If enemy will die, remove the bullet
                         bullet.kill()
-                        score = enemy.hit(bullet.damage)
+                        enemy.hit(bullet.damage)
                     else:
                         # If enemy won't die, bounce the bullet
                         enemy.hit(bullet.damage)
@@ -1248,12 +1443,20 @@ while running:
                 else:
                     # Normal bullets get removed
                     bullet.kill()
-                    score = enemy.hit(10)  # Normal bullet damage
+                    enemy.hit(10)  # Normal bullet damage
                 
                 if enemy.health <= 0:  # Enemy was destroyed
                     game_state.score += enemy.score_value * game_state.combo
                     game_state.combo += 1
-                    game_state.resources += 5  # Resources for destroying enemies
+                    
+                    # Adjust resources based on difficulty
+                    if game_state.difficulty == "easy":
+                        game_state.resources += 7  # More resources on easy
+                    elif game_state.difficulty == "normal":
+                        game_state.resources += 5  # Standard resources
+                    else:  # hard
+                        game_state.resources += 3  # Fewer resources on hard
+                        
                     if game_state.combo > game_state.max_combo:
                         game_state.max_combo = game_state.combo
                     
@@ -1277,95 +1480,199 @@ while running:
                 if boss.health <= 0:  # Boss was defeated
                     game_state.score += 500 * game_state.combo  # Boss score
                     game_state.combo += 1
-                    game_state.resources += 100  # Big resource bonus for boss
+                    
+                    # Adjust boss resources based on difficulty
+                    if game_state.difficulty == "easy":
+                        game_state.resources += 150  # More resources on easy
+                    elif game_state.difficulty == "normal":
+                        game_state.resources += 100  # Standard resources
+                    else:  # hard
+                        game_state.resources += 75  # Fewer resources on hard
         
         # Check for enemy bullet hits on player
         hits = pygame.sprite.spritecollide(player, enemy_bullets, True)
-        for bullet in hits:
-            if player.hit(bullet.damage):
+        if hits:
+            if player.hit(hits[0].damage):
                 game_state.state = "game_over"
-                game_state.combo = 1
-        
-        # Check for collisions with enemies
-        hits = pygame.sprite.spritecollide(player, enemies, False)
-        for enemy in hits:
-            if player.hit(20):  # Collision with enemy does 20 damage
+                
+        # Check for collision with enemies
+        hits = pygame.sprite.spritecollide(player, enemies, True)
+        if hits:
+            if player.hit(30):  # Collision with enemy does major damage
                 game_state.state = "game_over"
-                game_state.combo = 1
-            enemy.hit(50)  # Enemy also takes damage from collision
-        
-        # Check for collisions with bosses
+                
+        # Check for collision with power-ups
+        hits = pygame.sprite.spritecollide(player, powerups, True)
+        for power_up in hits:
+            power_up.apply_effect(player)
+            
+        # Check for collision with bosses
         hits = pygame.sprite.spritecollide(player, bosses, False)
-        for boss in hits:
+        if hits:
             if player.hit(30):  # Collision with boss does more damage
                 game_state.state = "game_over"
-                game_state.combo = 1
+                
+        # Check for player interaction with shop portal
+        portal_hits = pygame.sprite.spritecollide(player, shop_portals, False)
+        if portal_hits:
+            # Show "Press E to enter shop" text
+            for portal in portal_hits:
+                # If player presses E while touching portal
+                keys = pygame.key.get_pressed()
+                if keys[K_e]:
+                    # Enter shop and remove the portal
+                    print("Removing shop portal")  # Debug print
+                    
+                    # Remove portals from both groups
+                    for portal in shop_portals:
+                        portal.kill()  # This removes it from all sprite groups
+                    shop_portals.empty()  # This is redundant but kept for safety
+                    
+                    # Clear any existing bullets to prevent issues after shop
+                    bullets.empty()  # Clear all player bullets
+                    
+                    # Show upgrade menu between sectors
+                    if game_state.next_sector():
+                        # Game completed!
+                        pass
+                    else:
+                        # Show upgrade menu
+                        show_upgrade_menu()
+                        
+                    # Double-check that portals are removed - redundant but kept for safety
+                    shop_portals.empty()
         
-        # Add this line:
-        cleanup_sprites()
-        
-        # After all sprite updates and collision detections
-        if player.dying and pygame.time.get_ticks() - player.dying_start > player.dying_duration:
-            # Now transition to game over after the animation completes
-            game_state.state = "game_over"
-            game_state.combo = 1
+        # Check for wave completion
+        if len(enemies) == 0 and not game_state.boss_fight and 'shop_portals' in globals() and len(shop_portals) == 0:
+            # Move to next wave
+            if game_state.next_wave():
+                # Boss fight time!
+                boss = Boss(game_state.sector)
+                all_sprites.add(boss)
+                bosses.add(boss)
+                game_state.boss_fight = True
+            else:
+                # Spawn more enemies
+                for i in range(game_state.wave_enemies):
+                    if random.random() < 0.3:  # 30% chance of elite enemy
+                        enemy = Enemy("elite")
+                    else:
+                        enemy = Enemy("basic")
+                    all_sprites.add(enemy)
+                    enemies.add(enemy)
     
     # Draw / render
     screen.fill(BLACK)
     
+    # Create a gameplay surface that's the original game size
+    gameplay_surface = pygame.Surface((WIDTH, HEIGHT))
+    gameplay_surface.fill(BLACK)
+    
     if game_state.state == "menu":
-        # Draw menu screen
-        draw_text(screen, "SPACE FIGHTER", 64, WIDTH / 2, HEIGHT / 4)
-        draw_text(screen, "WASD or Arrow keys to move, SPACE or LEFT CLICK to shoot", 22, WIDTH / 2, HEIGHT / 2)
-        draw_text(screen, "SHIFT for Hyper Dash, E for Energy Shield", 22, WIDTH / 2, HEIGHT / 2 + 30)
-        draw_text(screen, "Press any key to begin", 18, WIDTH / 2, HEIGHT * 3 / 4)
+        # Draw menu screen on the gameplay surface
+        draw_text(gameplay_surface, "Xbacab", 64, WIDTH / 2, HEIGHT / 4)
         
-        # Check for key press to start
-        keystate = pygame.key.get_pressed()
-        if any(keystate):
+        # Menu buttons
+        button_width = 200
+        button_height = 60
+        button_y = HEIGHT / 2
+        spacing = 80
+        
+        # Start Game button
+        if draw_button(gameplay_surface, "Start Game", 30, WIDTH/2, button_y, button_width, button_height):
             game_state.state = "playing"
             
+        # Controls button
+        if draw_button(gameplay_surface, "Controls", 30, WIDTH/2, button_y + spacing, button_width, button_height):
+            show_controls_screen()
+            
+        # Difficulty button
+        if draw_button(gameplay_surface, "Difficulty", 30, WIDTH/2, button_y + spacing*2, button_width, button_height):
+            show_difficulty_screen()
+        
+        # Display current difficulty
+        draw_text(gameplay_surface, f"Current Difficulty: {game_state.difficulty.capitalize()}", 18, WIDTH / 2, HEIGHT - 50)
+            
     elif game_state.state == "playing":
-        # Draw all sprites
-        all_sprites.draw(screen)
+        # Draw all sprites to the gameplay surface
+        all_sprites.draw(gameplay_surface)
         
         # Draw player information
-        draw_bar(screen, 10, 10, player.health, player.max_health, 200, 20, GREEN)
-        draw_text(screen, f"Health: {int(player.health)}/{player.max_health}", 18, 110, 10)
+        draw_bar(gameplay_surface, 10, 10, player.health, player.max_health, 200, 20, GREEN)
+        draw_text(gameplay_surface, f"Health: {int(player.health)}/{player.max_health}", 18, 110, 10)
         
-        draw_bar(screen, 10, 40, player.energy, player.max_energy, 200, 20, BLUE)
-        draw_text(screen, f"Energy: {int(player.energy)}/{player.max_energy}", 18, 110, 40)
+        draw_bar(gameplay_surface, 10, 40, player.energy, player.max_energy, 200, 20, BLUE)
+        draw_text(gameplay_surface, f"Energy: {int(player.energy)}/{player.max_energy}", 18, 110, 40)
+        
+        # Add weapon type indicator
+        weapon_colors = {
+            "normal": YELLOW,
+            "spread": GREEN,
+            "bouncing": (0, 255, 0)  # Bright green for bouncing
+        }
+        weapon_type = player.weapon_type.capitalize()
+        weapon_level = player.weapon_level
+        draw_text(gameplay_surface, f"Weapon: {weapon_type} (Lvl {weapon_level})", 18, 110, 70, weapon_colors.get(player.weapon_type, WHITE))
         
         # Draw shield if active
         if player.shield_active:
-            pygame.draw.circle(screen, BLUE, player.rect.center, 40, 2)
+            pygame.draw.circle(gameplay_surface, BLUE, player.rect.center, 40, 2)
             
         # Draw game information
-        draw_text(screen, f"Score: {game_state.score}", 22, WIDTH - 100, 10)
-        draw_text(screen, f"Combo: x{game_state.combo}", 18, WIDTH - 100, 40)
-        draw_text(screen, f"Sector: {game_state.sector} - Wave: {game_state.wave}", 18, WIDTH - 100, 70)
-        draw_text(screen, f"Resources: {game_state.resources}", 18, WIDTH - 100, 100)
+        draw_text(gameplay_surface, f"Score: {game_state.score}", 22, WIDTH - 100, 10)
+        draw_text(gameplay_surface, f"Combo: x{game_state.combo}", 18, WIDTH - 100, 40)
+        draw_text(gameplay_surface, f"Sector: {game_state.sector} - Wave: {game_state.wave}", 18, WIDTH - 100, 70)
+        draw_text(gameplay_surface, f"Drones: {len(player.drone_list)}/{player.max_drones}", 18, WIDTH - 100, 100)
+        draw_text(gameplay_surface, f"Resources: {game_state.resources}", 18, WIDTH - 100, 130)
         
         # Draw boss health bar if fighting a boss
         if game_state.boss_fight and bosses:
             boss = bosses.sprites()[0]
-            draw_bar(screen, WIDTH//2 - 150, HEIGHT - 30, boss.health, boss.max_health, 300, 20, RED)
-            draw_text(screen, boss.name, 20, WIDTH//2, HEIGHT - 50)
+            draw_bar(gameplay_surface, WIDTH//2 - 150, HEIGHT - 30, boss.health, boss.max_health, 300, 20, RED)
+            draw_text(gameplay_surface, boss.name, 20, WIDTH//2, HEIGHT - 50)
+        
+        # Draw special effects
+        if player.hyper_dash_active:
+            # Draw dash trail
+            for i in range(5):
+                trail_alpha = 150 - (i * 30)  # Fade out the trail
+                s = pygame.Surface((player.rect.width, player.rect.height), pygame.SRCALPHA)
+                s.fill((0, 255, 255, trail_alpha))
+                trail_rect = s.get_rect()
+                trail_rect.center = (player.rect.centerx, player.rect.centery + (i * 15))
+                gameplay_surface.blit(s, trail_rect)
+                
+        # Check for wave completion
+        if len(enemies) == 0 and not game_state.boss_fight and 'shop_portals' in globals() and len(shop_portals) == 0:
+            # Move to next wave
+            if game_state.next_wave():
+                # Boss fight time!
+                boss = Boss(game_state.sector)
+                all_sprites.add(boss)
+                bosses.add(boss)
+                game_state.boss_fight = True
+            else:
+                # Spawn more enemies
+                for i in range(game_state.wave_enemies):
+                    if random.random() < 0.3:  # 30% chance of elite enemy
+                        enemy = Enemy("elite")
+                    else:
+                        enemy = Enemy("basic")
+                    all_sprites.add(enemy)
+                    enemies.add(enemy)
             
         # Draw portal special effects and text
         for portal in shop_portals:
-            portal.draw(screen)
-        
+            portal.draw(gameplay_surface)
+    
     elif game_state.state == "game_over":
         # Draw game over screen
-        draw_text(screen, "GAME OVER", 64, WIDTH / 2, HEIGHT / 4)
-        draw_text(screen, f"Score: {game_state.score}", 36, WIDTH / 2, HEIGHT / 2)
-        draw_text(screen, f"Max Combo: x{game_state.max_combo}", 24, WIDTH / 2, HEIGHT / 2 + 50)
-        draw_text(screen, "Press any key to return to menu", 18, WIDTH / 2, HEIGHT * 3 / 4)
+        draw_text(gameplay_surface, "GAME OVER", 64, WIDTH / 2, HEIGHT / 4)
+        draw_text(gameplay_surface, f"Score: {game_state.score}", 36, WIDTH / 2, HEIGHT / 2)
+        draw_text(gameplay_surface, f"Max Combo: x{game_state.max_combo}", 24, WIDTH / 2, HEIGHT / 2 + 50)
         
-        # Check for key press to return to menu
-        keystate = pygame.key.get_pressed()
-        if any(keystate):
+        # Add a continue button
+        if draw_button(gameplay_surface, "Continue", 24, WIDTH / 2, HEIGHT * 3 / 4, 200, 50):
             # Reset game
             game_state.reset()
             all_sprites = pygame.sprite.Group()
@@ -1386,15 +1693,13 @@ while running:
     
     elif game_state.state == "victory":
         # Draw victory screen
-        draw_text(screen, "CONGRATULATIONS!", 64, WIDTH / 2, HEIGHT / 4)
-        draw_text(screen, "You defeated the Dominion Mothership!", 36, WIDTH / 2, HEIGHT / 2 - 50)
-        draw_text(screen, f"Final Score: {game_state.score}", 36, WIDTH / 2, HEIGHT / 2)
-        draw_text(screen, f"Max Combo: x{game_state.max_combo}", 24, WIDTH / 2, HEIGHT / 2 + 50)
-        draw_text(screen, "Press any key to return to menu", 18, WIDTH / 2, HEIGHT * 3 / 4)
+        draw_text(gameplay_surface, "CONGRATULATIONS!", 64, WIDTH / 2, HEIGHT / 4)
+        draw_text(gameplay_surface, "You defeated the Dominion Mothership!", 36, WIDTH / 2, HEIGHT / 2 - 50)
+        draw_text(gameplay_surface, f"Final Score: {game_state.score}", 36, WIDTH / 2, HEIGHT / 2)
+        draw_text(gameplay_surface, f"Max Combo: x{game_state.max_combo}", 24, WIDTH / 2, HEIGHT / 2 + 50)
         
-        # Check for key press to return to menu
-        keystate = pygame.key.get_pressed()
-        if any(keystate):
+        # Add a continue button
+        if draw_button(gameplay_surface, "Continue", 24, WIDTH / 2, HEIGHT * 3 / 4, 200, 50):
             # Reset game
             game_state.reset()
             all_sprites = pygame.sprite.Group()
@@ -1412,7 +1717,10 @@ while running:
                 enemy = Enemy()
                 all_sprites.add(enemy)
                 enemies.add(enemy)
-    
+                
+    # Draw the gameplay surface to the screen with offsets
+    screen.blit(gameplay_surface, (OFFSET_X, OFFSET_Y))
+
     # After drawing everything, flip the display
     pygame.display.flip()
 
