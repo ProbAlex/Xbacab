@@ -222,15 +222,9 @@ class Player(pygame.sprite.Sprite):
                 all_sprites.add(bullet3, bullet4)
                 bullets.add(bullet3, bullet4)
                 
-            # Drones also shoot normal bullets
+            # Drones also shoot normal bullets - let their own logic handle it
             for drone in self.drone_list:
-                # 50% chance to fire a bouncing bullet instead of normal
-                if random.random() < 0.5 and game_state.difficulty != "hard":
-                    bouncing_bullet = BouncingBullet(drone.rect.centerx, drone.rect.top)
-                    all_sprites.add(bouncing_bullet)
-                    bullets.add(bouncing_bullet)
-                else:
-                    drone.shoot()
+                drone.shoot()
                 
         elif self.weapon_type == "spread":
             for angle in range(-30, 31, 30):
@@ -238,21 +232,19 @@ class Player(pygame.sprite.Sprite):
                 all_sprites.add(bullet)
                 bullets.add(bullet)
                 
-            # Drones also shoot spread bullets
+            # Drones also shoot spread bullets - let their own logic handle it
             for drone in self.drone_list:
-                # 50% chance to fire a bouncing bullet instead of spread
-                if random.random() < 0.5 and game_state.difficulty != "hard":
-                    bouncing_bullet = BouncingBullet(drone.rect.centerx, drone.rect.top)
-                    all_sprites.add(bouncing_bullet)
-                    bullets.add(bouncing_bullet)
-                else:
-                    drone.shoot()
+                drone.shoot()
                 
         elif self.weapon_type == "bouncing":
             # Create a bouncing bullet that targets enemies
             bullet = BouncingBullet(self.rect.centerx, self.rect.top)
             all_sprites.add(bullet)
             bullets.add(bullet)
+            
+            # Drones also shoot bouncing bullets
+            for drone in self.drone_list:
+                drone.shoot()
 
     def hyper_dash(self):
         now = pygame.time.get_ticks()
@@ -323,22 +315,26 @@ class Drone(pygame.sprite.Sprite):
             self.rect.centery = self.player.rect.centery - int(math.cos(rad_angle) * radius)
 
     def shoot(self):
-        # Get the player's current weapon type
+        # First check player's current weapon type
         if self.player.weapon_type == "normal":
-            bullet = Bullet(self.rect.centerx, self.rect.top)
-            all_sprites.add(bullet)
-            bullets.add(bullet)
-        elif self.player.weapon_type == "spread":
-            # Drones shoot a smaller spread (just 3 bullets)
-            for angle in range(-15, 16, 15):
-                bullet = SpreadBullet(self.rect.centerx, self.rect.top, angle)
+            if(random.random() < 0.1):
+                bullet = Bullet(self.rect.centerx, self.rect.top)
                 all_sprites.add(bullet)
                 bullets.add(bullet)
+                
+        elif self.player.weapon_type == "spread":
+           for angle in range(-15, 16, 15):
+                if(random.random() < 0.1):
+                    bullet = SpreadBullet(self.rect.centerx, self.rect.top, angle)
+                    all_sprites.add(bullet)
+                    bullets.add(bullet)
+                    
         elif self.player.weapon_type == "bouncing":
-            # Create a bouncing bullet that targets enemies
-            bullet = BouncingBullet(self.rect.centerx, self.rect.top)
-            all_sprites.add(bullet)
-            bullets.add(bullet)
+            if(random.random() < 0.1):
+                # Always fire bouncing bullets when player has bouncing weapon type
+                bullet = BouncingBullet(self.rect.centerx, self.rect.top)
+                all_sprites.add(bullet)
+                bullets.add(bullet)
 
 # Bullet class
 class Bullet(pygame.sprite.Sprite):
@@ -1521,7 +1517,6 @@ while running:
                 keys = pygame.key.get_pressed()
                 if keys[K_e]:
                     # Enter shop and remove the portal
-                    print("Removing shop portal")  # Debug print
                     
                     # Remove portals from both groups
                     for portal in shop_portals:
