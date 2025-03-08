@@ -86,8 +86,29 @@ class Player(pygame.sprite.Sprite):
         self.drones = 0
         self.max_drones = 2
         self.drone_list = []
+        # Add dying state
+        self.dying = False
+        self.dying_start = 0
+        self.dying_duration = 1500
+        self.blink_interval = 150
+        self.visible = True
+        # Track mouse position for laser aiming
+        self.mouse_pos = (WIDTH // 2, 0)
 
     def update(self):
+        # Check if dying
+        if self.dying:
+            now = pygame.time.get_ticks()
+            # Blink effect
+            if (now - self.dying_start) % self.blink_interval < self.blink_interval // 2:
+                self.visible = True
+            else:
+                self.visible = False
+                
+            if now - self.dying_start > self.dying_duration:
+                self.kill()
+                return
+                
         # Movement
         self.speedx = 0
         self.speedy = 0
@@ -122,12 +143,10 @@ class Player(pygame.sprite.Sprite):
             
         # Automatically shoot
         now = pygame.time.get_ticks()
-        if keystate[K_SPACE] and now - self.last_shot > self.shoot_delay:
-            self.shoot()
-            self.last_shot = now
+        # Space or mouse button check is now handled in the main game loop
             
-        # Energy shield
-        if keystate[K_LSHIFT] and self.energy > 0:
+        # SWAPPED: Energy shield is now E key
+        if keystate[K_e] and self.energy > 0:
             self.shield_active = True
             self.energy -= 1
         else:
@@ -146,7 +165,7 @@ class Player(pygame.sprite.Sprite):
         if self.invincible:
             if now - self.invincible_start > self.invincible_duration:
                 self.invincible = False
-                
+
     def shoot(self):
         if self.weapon_type == "normal":
             bullet = Bullet(self.rect.centerx, self.rect.top)
@@ -166,16 +185,25 @@ class Player(pygame.sprite.Sprite):
                 all_sprites.add(bullet3, bullet4)
                 bullets.add(bullet3, bullet4)
                 
+            # Drones also shoot normal bullets
+            for drone in self.drone_list:
+                drone.shoot()
+                
         elif self.weapon_type == "spread":
             for angle in range(-30, 31, 30):
                 bullet = SpreadBullet(self.rect.centerx, self.rect.top, angle)
                 all_sprites.add(bullet)
                 bullets.add(bullet)
                 
-        elif self.weapon_type == "laser":
-            laser = Laser(self.rect.centerx, self.rect.top, self.weapon_level)
-            all_sprites.add(laser)
-            bullets.add(laser)
+            # Drones also shoot spread bullets
+            for drone in self.drone_list:
+                drone.shoot()
+                
+        elif self.weapon_type == "bouncing":
+            # Create a bouncing bullet that targets enemies
+            bullet = BouncingBullet(self.rect.centerx, self.rect.top)
+            all_sprites.add(bullet)
+            bullets.add(bullet)
 
     def hyper_dash(self):
         now = pygame.time.get_ticks()
@@ -191,17 +219,21 @@ class Player(pygame.sprite.Sprite):
             drone = Drone(self, len(self.drone_list))
             self.drone_list.append(drone)
             all_sprites.add(drone)
+            return True
+        return False
             
     def hit(self, damage):
         if not self.invincible:
             if self.shield_active:
                 # Shield absorbs damage
-                return
+                return False
             else:
                 self.health -= damage
-                if self.health <= 0:
-                    self.kill()
-                    return True
+                if self.health <= 0 and not self.dying:
+                    # Start dying animation instead of immediate kill
+                    self.dying = True
+                    self.dying_start = pygame.time.get_ticks()
+                    return False  # Changed to False to prevent immediate game over
         return False
 
 # Drone Class
@@ -215,9 +247,7 @@ class Drone(pygame.sprite.Sprite):
         self.position = position  # 0 for left, 1 for right
         
     def update(self, *args):
-        # Position the drone relative to the player
-        # Modified to not require player parameter from sprite group update
-        offset = 30
+        # Position the drone relative to the player without needing player parameter
         if self.position == 0:
             self.rect.right = self.player.rect.left - 10
         else:
@@ -225,9 +255,22 @@ class Drone(pygame.sprite.Sprite):
         self.rect.centery = self.player.rect.centery
         
     def shoot(self):
-        bullet = Bullet(self.rect.centerx, self.rect.top)
-        all_sprites.add(bullet)
-        bullets.add(bullet)
+        # Get the player's current weapon type
+        if self.player.weapon_type == "normal":
+            bullet = Bullet(self.rect.centerx, self.rect.top)
+            all_sprites.add(bullet)
+            bullets.add(bullet)
+        elif self.player.weapon_type == "spread":
+            # Drones shoot a smaller spread (just 3 bullets)
+            for angle in range(-15, 16, 15):
+                bullet = SpreadBullet(self.rect.centerx, self.rect.top, angle)
+                all_sprites.add(bullet)
+                bullets.add(bullet)
+        elif self.player.weapon_type == "bouncing":
+            # Create a bouncing bullet that targets enemies
+            bullet = BouncingBullet(self.rect.centerx, self.rect.top)
+            all_sprites.add(bullet)
+            bullets.add(bullet)
 
 # Bullet class
 class Bullet(pygame.sprite.Sprite):
@@ -245,6 +288,116 @@ class Bullet(pygame.sprite.Sprite):
         # Kill if it moves off the top of the screen
         if self.rect.bottom < 0:
             self.kill()
+
+class BouncingBullet(pygame.sprite.Sprite):
+    def __init__(self, x, y):
+        pygame.sprite.Sprite.__init__(self)
+        self.image = pygame.Surface((8, 8))
+        self.image.fill(GREEN)  # Green color for bouncing bullets
+        self.rect = self.image.get_rect()
+        self.rect.centerx = x
+        self.rect.bottom = y
+        self.speed = 10  # Base speed
+        
+        # Find the closest enemy to target
+        self.target_enemy()
+        
+        # If we couldn't find an enemy, use a default upward movement
+        if not hasattr(self, 'speedy') or not hasattr(self, 'speedx'):
+            self.speedy = -self.speed
+            self.speedx = random.choice([-2, -1, 1, 2])  # Small random horizontal movement
+            
+        self.bounces = 0
+        self.max_bounces = 3  # Maximum number of bounces before disappearing
+        self.damage = 8  # Slightly less damage than regular bullets (which do 10)
+        
+    def target_enemy(self):
+        # Get a list of all enemies and bosses
+        all_targets = list(enemies) + list(bosses)
+        
+        if not all_targets:
+            # No enemies found, will use default movement
+            return
+            
+        # Find the closest enemy
+        closest_enemy = None
+        closest_distance = float('inf')
+        
+        for enemy in all_targets:
+            # Calculate distance to this enemy
+            dx = enemy.rect.centerx - self.rect.centerx
+            dy = enemy.rect.centery - self.rect.centery
+            distance = math.sqrt(dx * dx + dy * dy)
+            
+            if distance < closest_distance:
+                closest_distance = distance
+                closest_enemy = enemy
+                
+        if closest_enemy:
+            # Calculate direction to the closest enemy
+            dx = closest_enemy.rect.centerx - self.rect.centerx
+            dy = closest_enemy.rect.centery - self.rect.centery
+            
+            # Normalize the direction vector
+            length = max(1, math.sqrt(dx * dx + dy * dy))  # Prevent division by zero
+            dx /= length
+            dy /= length
+            
+            # Set velocity components, keep overall speed consistent
+            self.speedx = dx * self.speed
+            self.speedy = dy * self.speed
+        
+    def update(self):
+        self.rect.y += self.speedy
+        self.rect.x += self.speedx
+        
+        # Bounce off the sides of the screen
+        if self.rect.right > WIDTH:
+            self.rect.right = WIDTH
+            self.speedx = -self.speedx
+            self.bounces += 1
+            self.retarget_after_bounce()
+        if self.rect.left < 0:
+            self.rect.left = 0
+            self.speedx = -self.speedx
+            self.bounces += 1
+            self.retarget_after_bounce()
+            
+        # Bounce off the top of the screen
+        if self.rect.top < 0:
+            self.rect.top = 0
+            self.speedy = -self.speedy
+            self.bounces += 1
+            self.retarget_after_bounce()
+            
+        # Kill if it moves off the bottom of the screen or exceeds max bounces
+        if self.rect.top > HEIGHT or self.bounces >= self.max_bounces:
+            self.kill()
+    
+    def retarget_after_bounce(self):
+        # After bouncing, try to retarget toward closest enemy (50% chance)
+        if random.random() < 0.5:
+            self.target_enemy()
+            
+    def bounce_off_enemy(self):
+        # Called when the bullet hits an enemy but doesn't kill it
+        self.speedy = -self.speedy
+        self.speedx = -self.speedx  # Reverse direction
+        
+        # Slightly randomize the direction for more interesting bounces
+        angle_variation = random.uniform(-30, 30)  # Up to 30 degrees variation
+        angle = math.degrees(math.atan2(self.speedy, self.speedx)) + angle_variation
+        angle_radians = math.radians(angle)
+        
+        speed = math.sqrt(self.speedx**2 + self.speedy**2)
+        self.speedx = math.cos(angle_radians) * speed
+        self.speedy = math.sin(angle_radians) * speed
+        
+        self.bounces += 1
+        
+        # Try to retarget after bouncing (50% chance)
+        if random.random() < 0.5:
+            self.target_enemy()
 
 # Spread bullet class
 class SpreadBullet(pygame.sprite.Sprite):
@@ -268,18 +421,26 @@ class SpreadBullet(pygame.sprite.Sprite):
 
 # Laser class
 class Laser(pygame.sprite.Sprite):
-    def __init__(self, x, y, level):
+    def __init__(self, x, y, level, angle=0, color=RED):
         pygame.sprite.Sprite.__init__(self)
         self.level = level
         width = 10 + (level * 5)  # Wider with higher level
-        self.image = pygame.Surface((width, HEIGHT))
-        self.image.fill(RED)
+        length = HEIGHT  # Length of the laser
+        
+        # Create a surface for the original laser pointing up
+        original = pygame.Surface((width, length), pygame.SRCALPHA)
+        original.fill(color)
+        
+        # Rotate the laser to point at the target angle
+        self.image = pygame.transform.rotate(original, angle)
         self.rect = self.image.get_rect()
         self.rect.centerx = x
-        self.rect.bottom = y
+        self.rect.centery = y
+        
         self.damage = 5 * level
-        self.duration = 500  # Laser lasts for 500ms
+        self.duration = 800  # Increased from 500ms
         self.created = pygame.time.get_ticks()
+        self.angle = angle
         
     def update(self):
         now = pygame.time.get_ticks()
@@ -292,13 +453,17 @@ class Enemy(pygame.sprite.Sprite):
         pygame.sprite.Sprite.__init__(self)
         self.enemy_type = enemy_type
         
+        # Base speed calculation - scales with game sector
+        base_min_speed = 2 + (game_state.sector - 1) * 0.5
+        base_max_speed = 5 + (game_state.sector - 1) * 0.5
+        
         if enemy_type == "basic":
             self.image = pygame.Surface((40, 40), pygame.SRCALPHA)
             pygame.draw.polygon(self.image, RED, [(0, 0), (40, 0), (20, 40)])
             self.rect = self.image.get_rect()
-            self.health = 10
-            self.speed = random.randrange(2, 5)
-            self.shoot_delay = 2000
+            self.health = 10  # Reduced for easier gameplay
+            self.speed = random.uniform(base_min_speed, base_max_speed)  # Speed scales with sector
+            self.shoot_delay = 2000  # Base delay
             self.score_value = 10
             
         elif enemy_type == "elite":
@@ -306,53 +471,66 @@ class Enemy(pygame.sprite.Sprite):
             pygame.draw.polygon(self.image, PURPLE, [(0, 0), (60, 0), (30, 60)])
             self.rect = self.image.get_rect()
             self.health = 50
-            self.speed = random.randrange(2, 5)
-            self.shoot_delay = 1000
-            self.score_value = 30
+            self.speed = random.uniform(base_min_speed, base_max_speed)
+            self.shoot_delay = 1000  # Base delay
+            self.score_value = 25  # Elite enemies are worth more points
             
+        # Add random offset to shoot delay to prevent synchronized firing
+        self.shoot_delay += random.randint(-500, 500)
+        
+        # Random initial delay so they don't all start firing at once
+        self.last_shot = pygame.time.get_ticks() - random.randint(0, self.shoot_delay)
+        
         self.rect.x = random.randrange(0, WIDTH - self.rect.width)
         self.rect.y = random.randrange(-150, -50)
-        self.last_shot = pygame.time.get_ticks()
+        
+        # Track this enemy's bullets
+        self.bullets = []
         
     def update(self):
+        # Update enemy position and shooting logic
         self.rect.y += self.speed
-        # Remove if it goes off the bottom
-        if self.rect.top > HEIGHT:
-            self.rect.x = random.randrange(0, WIDTH - self.rect.width)
-            self.rect.y = random.randrange(-150, -50)
-            
-        # Randomly shoot
         now = pygame.time.get_ticks()
+        
+        # Check if it's time to shoot
         if now - self.last_shot > self.shoot_delay:
             self.shoot()
             self.last_shot = now
             
     def shoot(self):
         if self.enemy_type == "basic":
-            bullet = EnemyBullet(self.rect.centerx, self.rect.bottom)
+            bullet = EnemyBullet(self.rect.centerx, self.rect.bottom, self)
             all_sprites.add(bullet)
             enemy_bullets.add(bullet)
+            self.bullets.append(bullet)  # Track this bullet
         elif self.enemy_type == "elite":
             for angle in range(-30, 31, 60):  # Changed from 30 to 60 (fewer bullets)
-                bullet = EnemySpreadBullet(self.rect.centerx, self.rect.bottom, angle)
+                bullet = EnemySpreadBullet(self.rect.centerx, self.rect.bottom, angle, self)
                 all_sprites.add(bullet)
                 enemy_bullets.add(bullet)
+                self.bullets.append(bullet)  # Track this bullet
                 
     def hit(self, damage):
         self.health -= damage
         if self.health <= 0:
+            # Destroy all bullets fired by this enemy
+            for bullet in self.bullets[:]:  # Use a copy of the list to safely iterate
+                bullet.kill()
+            self.bullets.clear()  # Clear the list
+            
             # Random chance to drop a power-up
             if random.random() < 0.3:
                 power_up = PowerUp(self.rect.centerx, self.rect.centery)
                 all_sprites.add(power_up)
                 powerups.add(power_up)
+                
             self.kill()
             return self.score_value
         return 0
 
 # Enemy bullet classes
 class EnemyBullet(pygame.sprite.Sprite):
-    def __init__(self, x, y):
+    def __init__(self, x, y, owner=None):
         pygame.sprite.Sprite.__init__(self)
         self.image = pygame.Surface((5, 15))
         self.image.fill(RED)
@@ -361,15 +539,20 @@ class EnemyBullet(pygame.sprite.Sprite):
         self.rect.top = y
         self.speedy = 5
         self.damage = 5
+        self.owner = owner  # Store reference to the enemy that fired this bullet
         
     def update(self):
         self.rect.y += self.speedy
         # Kill if it moves off the bottom of the screen
         if self.rect.top > HEIGHT:
             self.kill()
+        # Remove reference from owner's bullet list when bullet is destroyed
+        if self.owner and not self.alive():
+            if self in self.owner.bullets:
+                self.owner.bullets.remove(self)
 
 class EnemySpreadBullet(pygame.sprite.Sprite):
-    def __init__(self, x, y, angle):
+    def __init__(self, x, y, angle, owner=None):
         pygame.sprite.Sprite.__init__(self)
         self.image = pygame.Surface((8, 8))
         self.image.fill(PURPLE)
@@ -380,13 +563,18 @@ class EnemySpreadBullet(pygame.sprite.Sprite):
         self.speedy = 6 * math.cos(self.angle)
         self.speedx = 6 * math.sin(self.angle)
         self.damage = 15
+        self.owner = owner  # Store reference to the enemy that fired this bullet
         
     def update(self):
         self.rect.y += self.speedy
         self.rect.x += self.speedx
         # Kill if it moves off the screen
-        if self.rect.top > HEIGHT or self.rect.right < 0 or self.rect.left > WIDTH:
+        if self.rect.bottom < 0 or self.rect.top > HEIGHT or self.rect.left > WIDTH or self.rect.right < 0:
             self.kill()
+        # Remove reference from owner's bullet list when bullet is destroyed
+        if self.owner and not self.alive():
+            if self in self.owner.bullets:
+                self.owner.bullets.remove(self)
 
 # PowerUp class
 class PowerUp(pygame.sprite.Sprite):
@@ -414,11 +602,37 @@ class PowerUp(pygame.sprite.Sprite):
         if self.rect.top > HEIGHT:
             self.kill()
 
+    def apply_effect(self, player):
+        if self.type == "health":
+            player.health = min(player.max_health, player.health + 20)
+        elif self.type == "shield":
+            player.energy = player.max_energy
+        elif self.type == "weapon":
+            weapon_types = ["normal", "spread", "bouncing"]
+            if player.weapon_level < 3:
+                player.weapon_level += 1
+            else:
+                idx = weapon_types.index(player.weapon_type)
+                player.weapon_type = weapon_types[(idx + 1) % len(weapon_types)]
+                player.weapon_level = 1
+        elif self.type == "drone":
+            player.add_drone()
+        
+        # Grant temporary invincibility
+        player.invincible = True
+        player.invincible_start = pygame.time.get_ticks()
+
 # Boss class
 class Boss(pygame.sprite.Sprite):
     def __init__(self, sector):
         pygame.sprite.Sprite.__init__(self)
         self.sector = sector
+        
+        # Initialize the dying state
+        self.dying = False
+        
+        # Track boss bullets
+        self.bullets = []
         
         # Boss visuals and stats based on sector
         if sector == 1:
@@ -532,25 +746,28 @@ class Boss(pygame.sprite.Sprite):
         if self.pattern == 0:
             # Simple spread pattern
             for angle in range(-45, 46, 15):
-                bullet = EnemySpreadBullet(self.rect.centerx, self.rect.bottom, angle)
+                bullet = EnemySpreadBullet(self.rect.centerx, self.rect.bottom, angle, self)
                 all_sprites.add(bullet)
                 enemy_bullets.add(bullet)
+                self.bullets.append(bullet)  # Track this bullet
         elif self.pattern == 1:
             # Circular pattern
             for angle in range(0, 360, 30):
-                bullet = EnemySpreadBullet(self.rect.centerx, self.rect.centery, angle)
+                bullet = EnemySpreadBullet(self.rect.centerx, self.rect.centery, angle, self)
                 bullet.speedy = 6 * math.cos(math.radians(angle))
                 bullet.speedx = 6 * math.sin(math.radians(angle))
                 all_sprites.add(bullet)
                 enemy_bullets.add(bullet)
-        else:  # pattern == 2
-            # Targeted shots at player
+                self.bullets.append(bullet)  # Track this bullet
+        elif self.pattern == 2:
+            # Aimed pattern
             angle = math.degrees(math.atan2(player.rect.centery - self.rect.centery, 
-                                          player.rect.centerx - self.rect.centerx))
+                                            player.rect.centerx - self.rect.centerx))
             for i in range(-2, 3):
-                bullet = EnemySpreadBullet(self.rect.centerx, self.rect.bottom, angle + (i * 10) + 90)
+                bullet = EnemySpreadBullet(self.rect.centerx, self.rect.bottom, angle + (i * 10) + 90, self)
                 all_sprites.add(bullet)
                 enemy_bullets.add(bullet)
+                self.bullets.append(bullet)  # Track this bullet
             
             # Also spawn some minions
             if random.random() < 0.3 and len(enemies) < 5:
@@ -562,18 +779,92 @@ class Boss(pygame.sprite.Sprite):
                 
     def hit(self, damage):
         self.health -= damage
-        if self.health <= 0:
-            # Drop multiple power-ups when boss is defeated
-            for _ in range(5):
-                power_up = PowerUp(self.rect.centerx + random.randint(-50, 50), 
-                                  self.rect.centery + random.randint(-50, 50))
+        if self.health <= 0 and not self.dying:
+            self.dying = True
+            
+            # Destroy all bullets fired by this boss
+            for bullet in self.bullets[:]:  # Use a copy of the list to safely iterate
+                bullet.kill()
+            self.bullets.clear()  # Clear the list
+            
+            # Drop several power-ups when boss is killed
+            for _ in range(3 + self.sector):
+                power_up = PowerUp(self.rect.centerx + random.randint(-50, 50),
+                                 self.rect.centery + random.randint(-50, 50))
                 all_sprites.add(power_up)
                 powerups.add(power_up)
+            
+            # Spawn a shop portal where the boss was
+            portal = ShopPortal(self.rect.centerx, self.rect.centery)
+            all_sprites.add(portal)
+            
+            # Add portal to a new sprite group for collision detection
+            if 'shop_portals' not in globals():
+                global shop_portals
+                shop_portals = pygame.sprite.Group()
+            shop_portals.add(portal)
+            
+            # Remove the boss
             self.kill()
-            # Return score and signal boss death
-            return self.score_value, True
-        # Return 0 score and boss still alive
-        return 0, False
+        
+        # Return whether the boss is still alive
+        return self.health <= 0
+
+# Add a new ShopPortal class
+class ShopPortal(pygame.sprite.Sprite):
+    def __init__(self, x, y):
+        pygame.sprite.Sprite.__init__(self)
+        # Create a visually distinct portal
+        self.image = pygame.Surface((80, 80), pygame.SRCALPHA)
+        pygame.draw.circle(self.image, (50, 255, 150), (40, 40), 35)  # Green outer circle
+        pygame.draw.circle(self.image, (0, 0, 0), (40, 40), 25)       # Black inner circle
+        pygame.draw.circle(self.image, (255, 255, 255), (40, 40), 15) # White core
+        
+        # Add pulsing effect
+        self.pulse_size = 0
+        self.pulse_direction = 1
+        self.original_image = self.image.copy()
+        
+        self.rect = self.image.get_rect()
+        self.rect.centerx = x
+        self.rect.centery = y
+        
+        # Add hover text
+        self.font = pygame.font.SysFont("Arial", 14)
+        self.text = self.font.render("ENTER SHOP (Press E)", True, WHITE)
+        self.text_rect = self.text.get_rect()
+        
+    def update(self):
+        # Create a pulsing effect
+        self.pulse_size += 0.1 * self.pulse_direction
+        if self.pulse_size > 5:
+            self.pulse_direction = -1
+        elif self.pulse_size < -5:
+            self.pulse_direction = 1
+            
+        # Pulse the portal
+        size = int(80 + self.pulse_size)
+        pulsed_image = pygame.Surface((size, size), pygame.SRCALPHA)
+        
+        # Draw the pulsing circles
+        pygame.draw.circle(pulsed_image, (50, 255, 150), (size//2, size//2), size//2 - 5)
+        pygame.draw.circle(pulsed_image, (0, 0, 0), (size//2, size//2), size//2 - 15)
+        pygame.draw.circle(pulsed_image, (255, 255, 255), (size//2, size//2), size//2 - 25)
+        
+        # Update image and rect
+        self.image = pulsed_image
+        old_center = self.rect.center
+        self.rect = self.image.get_rect()
+        self.rect.center = old_center
+        
+        # Update text position
+        self.text_rect.centerx = self.rect.centerx
+        self.text_rect.top = self.rect.bottom + 10
+        
+    def draw(self, surface):
+        # Draw the portal and text
+        surface.blit(self.image, self.rect)
+        surface.blit(self.text, self.text_rect)
 
 # Game state classes
 class GameState:
@@ -588,8 +879,23 @@ class GameState:
         self.difficulty = "normal"
         self.resources = 0
         self.boss_fight = False
-        self.wave_enemies = 5
+        self.wave_enemies = 5  # Reduced from 8 for easier start
         self.waves_per_sector = 5  # Waves to complete before boss
+        
+        # Track shop purchases for price increases
+        self.purchase_counts = {
+            "health": 0,
+            "engine": 0,
+            "shield": 0,
+            "drone": 0,
+            "drone_slot": 0
+        }
+        
+        # Track bosses defeated
+        self.bosses_defeated = 0
+        
+        # Difficulty scaling
+        self.difficulty_multiplier = 1.0
         
     def reset(self):
         self.state = "menu"
@@ -615,8 +921,13 @@ class GameState:
         self.wave = 1
         self.boss_fight = False
         self.resources += 100 * self.sector  # Award resources for sector completion
-        # Increase difficulty
-        self.wave_enemies += 2
+        
+        # Increase difficulty - more gradual progression
+        self.wave_enemies += 1  # Add just 1 enemy per sector instead of 2
+        self.difficulty_multiplier += 0.15  # 15% increase per sector
+        
+        # Track bosses defeated
+        self.bosses_defeated += 1
         
         # Game completed if all sectors done
         if self.sector > 6:
@@ -624,13 +935,20 @@ class GameState:
             return True
         return False
 
+    def get_item_price(self, item_type, base_price):
+        # Calculate price with 10% increase per purchase
+        count = self.purchase_counts.get(item_type, 0)
+        return int(base_price * (1 + (0.1 * count)))
+
 # Function to draw text
-def draw_text(surface, text, size, x, y, color=WHITE):
+def draw_text(surface, text, size, x, y, color=WHITE, return_rect=False):
     font = pygame.font.SysFont("Arial", size)
     text_surface = font.render(text, True, color)
     text_rect = text_surface.get_rect()
     text_rect.midtop = (x, y)
     surface.blit(text_surface, text_rect)
+    if return_rect:
+        return text_rect
 
 # Function to draw a health bar
 def draw_bar(surface, x, y, value, max_value, width, height, color):
@@ -651,6 +969,7 @@ enemy_bullets = pygame.sprite.Group()
 enemies = pygame.sprite.Group()
 powerups = pygame.sprite.Group()
 bosses = pygame.sprite.Group()
+shop_portals = pygame.sprite.Group()
 all_sprites.add(player)
 
 # Create initial enemies
@@ -663,15 +982,42 @@ for i in range(game_state.wave_enemies):
 def show_upgrade_menu():
     upgrade_running = True
     selected_option = 0
-    upgrade_options = [
-        {"name": "Hull Integrity", "cost": 50, "effect": "Increases max health by 20"},
-        {"name": "Engine Efficiency", "cost": 50, "effect": "Increases movement speed"},
-        {"name": "Shield Capacity", "cost": 50, "effect": "Increases energy and regen"},
-        {"name": "Drone Support", "cost": 100, "effect": "Adds a support drone"}
-    ]
+    option_rects = []  # Store rectangles for mouse detection
+    
+    # Base prices
+    base_prices = {
+        "health": 50,
+        "engine": 50,
+        "shield": 50,
+        "drone": 100,
+        "drone_slot": 200
+    }
     
     while upgrade_running:
         clock.tick(FPS)
+        mouse_pos = pygame.mouse.get_pos()
+        
+        # Create upgrade options dynamically
+        upgrade_options = [
+            {"name": "Hull Integrity", "cost": game_state.get_item_price("health", base_prices["health"]), 
+             "effect": "Increases max health by 20", "type": "health"},
+            {"name": "Engine Efficiency", "cost": game_state.get_item_price("engine", base_prices["engine"]), 
+             "effect": "Increases movement speed", "type": "engine"},
+            {"name": "Shield Capacity", "cost": game_state.get_item_price("shield", base_prices["shield"]), 
+             "effect": "Increases energy and regen", "type": "shield"},
+            {"name": f"Drone Support ({len(player.drone_list)}/{player.max_drones})", 
+             "cost": game_state.get_item_price("drone", base_prices["drone"]), 
+             "effect": "Adds a support drone", "type": "drone"}
+        ]
+        
+        # Add drone slot expansion after 3 bosses
+        if game_state.bosses_defeated >= 3:
+            upgrade_options.append({
+                "name": "Drone Bay Expansion", 
+                "cost": game_state.get_item_price("drone_slot", base_prices["drone_slot"]), 
+                "effect": "Increases max drone capacity by 1", 
+                "type": "drone_slot"
+            })
         
         # Process input
         for event in pygame.event.get():
@@ -681,46 +1027,90 @@ def show_upgrade_menu():
             elif event.type == KEYDOWN:
                 if event.key == K_ESCAPE:
                     upgrade_running = False
-                elif event.key == K_UP:
+                elif event.key == K_UP or event.key == K_w:  # Allow W for up
                     selected_option = (selected_option - 1) % len(upgrade_options)
-                elif event.key == K_DOWN:
+                elif event.key == K_DOWN or event.key == K_s:  # Allow S for down
                     selected_option = (selected_option + 1) % len(upgrade_options)
                 elif event.key == K_RETURN:
                     # Apply upgrade if enough resources
-                    option = upgrade_options[selected_option]
-                    if game_state.resources >= option["cost"]:
-                        game_state.resources -= option["cost"]
-                        if selected_option == 0:  # Hull Integrity
-                            player.max_health += 20
-                            player.health = player.max_health
-                        elif selected_option == 1:  # Engine Efficiency
-                            player.speed_factor = 1.2
-                        elif selected_option == 2:  # Shield Capacity
-                            player.max_energy += 20
-                            player.energy_regen += 0.2
-                            player.energy = player.max_energy
-                        elif selected_option == 3:  # Drone Support
-                            player.add_drone()
-                        
+                    apply_upgrade(upgrade_options[selected_option])
+            elif event.type == MOUSEBUTTONDOWN:
+                if event.button == 1:  # Left mouse button
+                    # Check if click is on an option
+                    for i, rect in enumerate(option_rects):
+                        if rect.collidepoint(mouse_pos):
+                            if i < len(upgrade_options):  # Make sure the option exists
+                                apply_upgrade(upgrade_options[i])
+                                break
+        
         # Draw upgrade menu
         screen.fill(BLACK)
         
         draw_text(screen, "UPGRADE MENU", 40, WIDTH / 2, 30)
         draw_text(screen, f"Resources: {game_state.resources}", 25, WIDTH / 2, 80)
         
+        option_rects = []  # Reset the list
         for i, option in enumerate(upgrade_options):
             color = RED if game_state.resources < option["cost"] else GREEN
+            
+            # If it's a drone option and player is at max, show as unavailable
+            if option["type"] == "drone" and len(player.drone_list) >= player.max_drones:
+                color = RED
+                
             highlight = ">" if i == selected_option else " "
-            draw_text(screen, f"{highlight} {option['name']} (Cost: {option['cost']})", 
-                    20, WIDTH / 2, 150 + (i * 40), color)
-            draw_text(screen, option["effect"], 16, WIDTH / 2, 170 + (i * 40), WHITE)
+            
+            # Calculate text position
+            y_pos = 150 + (i * 40)
+            text = f"{highlight} {option['name']} (Cost: {option['cost']})"
+            
+            # Draw option and get its rect for mouse detection
+            text_rect = draw_text(screen, text, 20, WIDTH / 2, y_pos, color, return_rect=True)
+            option_rects.append(text_rect)
+            
+            draw_text(screen, option["effect"], 16, WIDTH / 2, y_pos + 20, WHITE)
             
         draw_text(screen, "Arrow keys to select, ENTER to purchase, ESC to exit", 
                 18, WIDTH / 2, HEIGHT - 50)
+        draw_text(screen, "You can also click on options with your mouse", 
+                18, WIDTH / 2, HEIGHT - 30)
         
         pygame.display.flip()
     
     return
+
+# Function to apply upgrades (extracted for reuse)
+def apply_upgrade(option):
+    if game_state.resources >= option["cost"]:
+        # Check if trying to add drone when at max
+        if option["type"] == "drone" and len(player.drone_list) >= player.max_drones:
+            return
+            
+        # Apply the upgrade
+        game_state.resources -= option["cost"]
+        
+        if option["type"] == "health":
+            player.max_health += 20
+            player.health = player.max_health
+            game_state.purchase_counts["health"] += 1
+            
+        elif option["type"] == "engine":
+            player.speed_factor = 1.2
+            game_state.purchase_counts["engine"] += 1
+            
+        elif option["type"] == "shield":
+            player.max_energy += 20
+            player.energy_regen += 0.2
+            player.energy = player.max_energy
+            game_state.purchase_counts["shield"] += 1
+            
+        elif option["type"] == "drone":
+            success = player.add_drone()
+            if success:
+                game_state.purchase_counts["drone"] += 1
+                
+        elif option["type"] == "drone_slot":
+            player.max_drones += 1
+            game_state.purchase_counts["drone_slot"] += 1
 
 # Add basic sprite cleanup to save resources
 def cleanup_sprites():
@@ -739,6 +1129,11 @@ while running:
     # Keep game running at the right speed
     clock.tick(FPS)
     
+    # Get mouse position for laser aiming
+    mouse_pos = pygame.mouse.get_pos()
+    if player is not None:  # Make sure player exists
+        player.mouse_pos = mouse_pos
+    
     # Process input (events)
     for event in pygame.event.get():
         # Check for closing window
@@ -747,14 +1142,49 @@ while running:
         elif event.type == KEYDOWN:
             if event.key == K_ESCAPE:
                 running = False
-            elif event.key == K_e and game_state.state == "playing":
+            elif event.key == K_LSHIFT and game_state.state == "playing":
+                # SWAPPED: Shift now activates hyper dash
                 player.hyper_dash()
+        elif event.type == MOUSEBUTTONDOWN:
+            # Left click to shoot
+            if event.button == 1 and game_state.state == "playing":
+                now = pygame.time.get_ticks()
+                if now - player.last_shot > player.shoot_delay:
+                    player.shoot()
+                    player.last_shot = now
+    
+    if game_state.state == "playing":
+        # Check keyboard for shooting (space bar)
+        keystate = pygame.key.get_pressed()
+        if keystate[K_SPACE]:
+            now = pygame.time.get_ticks()
+            if now - player.last_shot > player.shoot_delay:
+                player.shoot()
+                player.last_shot = now
     
     # Update game state
     if game_state.state == "playing":
         # Update all sprites
         all_sprites.update()
         
+        # Draw player based on visibility (for dying animation)
+        if player.dying and not player.visible:
+            all_sprites.remove(player)
+        elif player.dying and player.visible and player not in all_sprites:
+            all_sprites.add(player)
+        
+        # Handle boss visibility for dying animation
+        for boss in bosses:
+            if boss.dying and not boss.visible:
+                all_sprites.remove(boss)
+            elif boss.dying and boss.visible and boss not in all_sprites:
+                all_sprites.add(boss)
+        
+        # Check for powerup collection
+        hits = pygame.sprite.spritecollide(player, powerups, True)
+        for powerup in hits:
+            powerup.apply_effect(player)
+            
         # Check if enemy wave is cleared
         if len(enemies) == 0 and not game_state.boss_fight:
             if game_state.next_wave():
@@ -772,38 +1202,82 @@ while running:
                     all_sprites.add(enemy)
                     enemies.add(enemy)
                     
-        # Check if boss is defeated
-        if game_state.boss_fight and len(bosses) == 0:
-            game_state.boss_fight = False
-            # Show upgrade menu between sectors
-            if game_state.next_sector():
-                # Game completed!
-                pass
-            else:
-                # Show upgrade menu
-                show_upgrade_menu()
+        # Check for player interaction with shop portal
+        portal_hits = pygame.sprite.spritecollide(player, shop_portals, False)
+        if portal_hits:
+            # Show "Press E to enter shop" text
+            for portal in portal_hits:
+                # If player presses E while touching portal
+                keys = pygame.key.get_pressed()
+                if keys[K_e]:
+                    # Enter shop and remove the portal
+                    
+                    # Remove portals from both groups
+                    for portal in shop_portals:
+                        portal.kill()  # This removes it from all sprite groups
+                    shop_portals.empty()  # This is redundant but kept for safety
+                    
+                    # Clear any existing bullets to prevent issues after shop
+                    bullets.empty()  # Clear all player bullets
+                    
+                    # Show upgrade menu between sectors
+                    if game_state.next_sector():
+                        # Game completed!
+                        pass
+                    else:
+                        # Show upgrade menu
+                        show_upgrade_menu()
+                        
+                    # Double-check that portals are removed - redundant but kept for safety
+                    shop_portals.empty()
         
         # Check for bullet hits on enemies
-        hits = pygame.sprite.groupcollide(enemies, bullets, False, True)
+        hits = pygame.sprite.groupcollide(enemies, bullets, False, False)  # Changed to keep bullets
         for enemy, bullet_list in hits.items():
-            score = enemy.hit(10)  # Each bullet does 10 damage
-            if score > 0:  # Enemy was destroyed
-                game_state.score += score * game_state.combo
-                game_state.combo += 1
-                game_state.resources += 5  # Resources for destroying enemies
-                if game_state.combo > game_state.max_combo:
-                    game_state.max_combo = game_state.combo
+            for bullet in bullet_list:
+                if isinstance(bullet, BouncingBullet):
+                    # For bouncing bullets, check if enemy will die from this hit
+                    if enemy.health <= bullet.damage:
+                        # If enemy will die, remove the bullet
+                        bullet.kill()
+                        score = enemy.hit(bullet.damage)
+                    else:
+                        # If enemy won't die, bounce the bullet
+                        enemy.hit(bullet.damage)
+                        bullet.bounce_off_enemy()
+                else:
+                    # Normal bullets get removed
+                    bullet.kill()
+                    score = enemy.hit(10)  # Normal bullet damage
+                
+                if enemy.health <= 0:  # Enemy was destroyed
+                    game_state.score += enemy.score_value * game_state.combo
+                    game_state.combo += 1
+                    game_state.resources += 5  # Resources for destroying enemies
+                    if game_state.combo > game_state.max_combo:
+                        game_state.max_combo = game_state.combo
                     
         # Check for bullet hits on bosses
-        hits = pygame.sprite.groupcollide(bosses, bullets, False, True)
+        hits = pygame.sprite.groupcollide(bosses, bullets, False, False)  # Changed to keep bullets
         for boss, bullet_list in hits.items():
-            score, boss_defeated = boss.hit(10)  # Each bullet does 10 damage
-            if boss_defeated:
-                game_state.score += score * game_state.combo
-                game_state.combo += 1
-                game_state.resources += 100  # Big resource bonus for boss
-                if game_state.combo > game_state.max_combo:
-                    game_state.max_combo = game_state.combo
+            for bullet in bullet_list:
+                if isinstance(bullet, BouncingBullet):
+                    # For bouncing bullets, always bounce off bosses unless boss will die
+                    if boss.health <= bullet.damage:
+                        bullet.kill()
+                        boss.hit(bullet.damage)
+                    else:
+                        boss.hit(bullet.damage)
+                        bullet.bounce_off_enemy()
+                else:
+                    # Normal bullets get removed
+                    bullet.kill()
+                    boss.hit(10)  # Normal bullet damage
+                
+                if boss.health <= 0:  # Boss was defeated
+                    game_state.score += 500 * game_state.combo  # Boss score
+                    game_state.combo += 1
+                    game_state.resources += 100  # Big resource bonus for boss
         
         # Check for enemy bullet hits on player
         hits = pygame.sprite.spritecollide(player, enemy_bullets, True)
@@ -827,26 +1301,14 @@ while running:
                 game_state.state = "game_over"
                 game_state.combo = 1
         
-        # Check for power-up collection
-        hits = pygame.sprite.spritecollide(player, powerups, True)
-        for powerup in hits:
-            if powerup.type == "health":
-                player.health = min(player.max_health, player.health + 20)
-            elif powerup.type == "shield":
-                player.energy = player.max_energy
-            elif powerup.type == "weapon":
-                weapon_types = ["normal", "spread", "laser"]
-                if player.weapon_level < 3:
-                    player.weapon_level += 1
-                else:
-                    idx = weapon_types.index(player.weapon_type)
-                    player.weapon_type = weapon_types[(idx + 1) % len(weapon_types)]
-                    player.weapon_level = 1
-            elif powerup.type == "drone":
-                player.add_drone()
-        
         # Add this line:
         cleanup_sprites()
+        
+        # After all sprite updates and collision detections
+        if player.dying and pygame.time.get_ticks() - player.dying_start > player.dying_duration:
+            # Now transition to game over after the animation completes
+            game_state.state = "game_over"
+            game_state.combo = 1
     
     # Draw / render
     screen.fill(BLACK)
@@ -854,8 +1316,8 @@ while running:
     if game_state.state == "menu":
         # Draw menu screen
         draw_text(screen, "SPACE FIGHTER", 64, WIDTH / 2, HEIGHT / 4)
-        draw_text(screen, "WASD or Arrow keys to move, SPACE to shoot", 22, WIDTH / 2, HEIGHT / 2)
-        draw_text(screen, "E for Hyper Dash, SHIFT for Energy Shield", 22, WIDTH / 2, HEIGHT / 2 + 30)
+        draw_text(screen, "WASD or Arrow keys to move, SPACE or LEFT CLICK to shoot", 22, WIDTH / 2, HEIGHT / 2)
+        draw_text(screen, "SHIFT for Hyper Dash, E for Energy Shield", 22, WIDTH / 2, HEIGHT / 2 + 30)
         draw_text(screen, "Press any key to begin", 18, WIDTH / 2, HEIGHT * 3 / 4)
         
         # Check for key press to start
@@ -890,6 +1352,10 @@ while running:
             draw_bar(screen, WIDTH//2 - 150, HEIGHT - 30, boss.health, boss.max_health, 300, 20, RED)
             draw_text(screen, boss.name, 20, WIDTH//2, HEIGHT - 50)
             
+        # Draw portal special effects and text
+        for portal in shop_portals:
+            portal.draw(screen)
+        
     elif game_state.state == "game_over":
         # Draw game over screen
         draw_text(screen, "GAME OVER", 64, WIDTH / 2, HEIGHT / 4)
@@ -909,6 +1375,7 @@ while running:
             enemies = pygame.sprite.Group()
             powerups = pygame.sprite.Group()
             bosses = pygame.sprite.Group()
+            shop_portals = pygame.sprite.Group()
             all_sprites.add(player)
             
             # Create initial enemies
@@ -937,6 +1404,7 @@ while running:
             enemies = pygame.sprite.Group()
             powerups = pygame.sprite.Group()
             bosses = pygame.sprite.Group()
+            shop_portals = pygame.sprite.Group()
             all_sprites.add(player)
             
             # Create initial enemies
