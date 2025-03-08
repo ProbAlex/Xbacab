@@ -97,7 +97,7 @@ class Player(pygame.sprite.Sprite):
         
         self.shield_active = False
         self.shield_strength = 50
-        self.shoot_delay = 200
+        self.shoot_delay = 200  # 200ms = 5 shots per second
         self.last_shot = 0
         self.special_delay = 2000
         self.last_special = 0
@@ -204,6 +204,15 @@ class Player(pygame.sprite.Sprite):
                 self.invincible = False
 
     def shoot(self):
+        # Check if enough time has passed since last shot (CPS limit)
+        now = pygame.time.get_ticks()
+        if now - self.last_shot < self.shoot_delay:
+            return  # Don't shoot if firing too quickly
+        
+        # Update last shot time
+        self.last_shot = now
+        
+        # Now handle the actual shooting based on weapon type
         if self.weapon_type == "normal":
             bullet = Bullet(self.rect.centerx, self.rect.top)
             all_sprites.add(bullet)
@@ -245,6 +254,26 @@ class Player(pygame.sprite.Sprite):
             # Drones also shoot bouncing bullets
             for drone in self.drone_list:
                 drone.shoot()
+                
+        elif self.weapon_type == "homing":
+            # Number of homing missiles based on weapon level
+            num_missiles = self.weapon_level
+            
+            # Create homing missiles with slight angle variations
+            for i in range(num_missiles):
+                # Slight offset to left/right for multiple missiles
+                if num_missiles > 1:
+                    offset_x = self.rect.width * (i/(num_missiles-1) - 0.5)  # Spread across ship width
+                else:
+                    offset_x = 0
+                    
+                bullet = HomingBullet(self.rect.centerx + offset_x, self.rect.top)
+                all_sprites.add(bullet)
+                bullets.add(bullet)
+                
+            # Drones also shoot homing bullets
+            for drone in self.drone_list:
+                drone.shoot()
 
     def hyper_dash(self):
         now = pygame.time.get_ticks()
@@ -270,11 +299,9 @@ class Player(pygame.sprite.Sprite):
                 return False
             else:
                 self.health -= damage
-                if self.health <= 0 and not self.dying:
-                    # Start dying animation instead of immediate kill
-                    self.dying = True
-                    self.dying_start = pygame.time.get_ticks()
-                    return False  # Changed to False to prevent immediate game over
+                if self.health <= 0:
+                    # Return True to indicate player death
+                    return True
         return False
 
 # Drone Class
@@ -317,22 +344,28 @@ class Drone(pygame.sprite.Sprite):
     def shoot(self):
         # First check player's current weapon type
         if self.player.weapon_type == "normal":
-            if(random.random() < 0.1):
+            if(random.random() < 0.7):
                 bullet = Bullet(self.rect.centerx, self.rect.top)
                 all_sprites.add(bullet)
                 bullets.add(bullet)
                 
         elif self.player.weapon_type == "spread":
            for angle in range(-15, 16, 15):
-                if(random.random() < 0.1):
+                if(random.random() < 0.3):
                     bullet = SpreadBullet(self.rect.centerx, self.rect.top, angle)
                     all_sprites.add(bullet)
                     bullets.add(bullet)
                     
         elif self.player.weapon_type == "bouncing":
-            if(random.random() < 0.1):
+            if(random.random() < 0.5):
                 # Always fire bouncing bullets when player has bouncing weapon type
                 bullet = BouncingBullet(self.rect.centerx, self.rect.top)
+                all_sprites.add(bullet)
+                bullets.add(bullet)
+                
+        elif self.player.weapon_type == "homing":
+            if(random.random() < 0.2):  # 40% chance to fire
+                bullet = HomingBullet(self.rect.centerx, self.rect.top)
                 all_sprites.add(bullet)
                 bullets.add(bullet)
 
@@ -462,6 +495,90 @@ class BouncingBullet(pygame.sprite.Sprite):
         # Try to retarget after bouncing (50% chance)
         if random.random() < 0.5:
             self.target_enemy()
+
+class HomingBullet(pygame.sprite.Sprite):
+    def __init__(self, x, y):
+        pygame.sprite.Sprite.__init__(self)
+        self.image = pygame.Surface((8, 8))
+        self.image.fill((255, 128, 0))  # Orange color for homing bullets
+        self.rect = self.image.get_rect()
+        self.rect.centerx = x
+        self.rect.bottom = y
+        self.speed = 7  # Slower than normal bullets but constantly homing
+        self.damage = 12  # More damage than normal bullets
+        self.max_lifetime = 120  # Maximum frames before disappearing (2 seconds at 60 FPS)
+        self.lifetime = 0
+        
+        # Initial velocity (will be adjusted during homing)
+        self.speedx = 0
+        self.speedy = -self.speed
+        
+        # Target the closest enemy initially
+        self.find_target()
+        
+    def find_target(self):
+        # Get all potential targets (enemies and bosses)
+        all_targets = list(enemies) + list(bosses)
+        
+        # If no targets, maintain current direction
+        if not all_targets:
+            return None
+            
+        # Find closest target
+        closest_target = None
+        closest_distance = float('inf')
+        
+        for target in all_targets:
+            dx = target.rect.centerx - self.rect.centerx
+            dy = target.rect.centery - self.rect.centery
+            distance = math.sqrt(dx * dx + dy * dy)
+            
+            if distance < closest_distance:
+                closest_distance = distance
+                closest_target = target
+                
+        return closest_target
+    
+    def update(self):
+        # Increment lifetime
+        self.lifetime += 1
+        if self.lifetime >= self.max_lifetime:
+            self.kill()
+            return
+            
+        # Find target
+        target = self.find_target()
+        
+        # If we have a target, adjust direction toward it
+        if target:
+            # Calculate direction to target
+            dx = target.rect.centerx - self.rect.centerx
+            dy = target.rect.centery - self.rect.centery
+            
+            # Normalize the direction vector
+            distance = max(1, math.sqrt(dx * dx + dy * dy))
+            dx = dx / distance
+            dy = dy / distance
+            
+            # Gradually adjust velocity (for smooth homing effect)
+            homing_strength = 0.3  # How strongly it homes in on targets
+            self.speedx = self.speedx * (1 - homing_strength) + dx * self.speed * homing_strength
+            self.speedy = self.speedy * (1 - homing_strength) + dy * self.speed * homing_strength
+            
+            # Maintain consistent speed
+            current_speed = math.sqrt(self.speedx**2 + self.speedy**2)
+            if current_speed > 0:
+                self.speedx = self.speedx / current_speed * self.speed
+                self.speedy = self.speedy / current_speed * self.speed
+        
+        # Update position
+        self.rect.x += self.speedx
+        self.rect.y += self.speedy
+        
+        # Kill if it moves off the screen
+        if (self.rect.right < 0 or self.rect.left > WIDTH or 
+            self.rect.bottom < 0 or self.rect.top > HEIGHT):
+            self.kill()
 
 # Spread bullet class
 class SpreadBullet(pygame.sprite.Sprite):
@@ -696,9 +813,9 @@ class PowerUp(pygame.sprite.Sprite):
         elif self.type == "weapon":
             # Define weapon types based on difficulty
             if game_state.difficulty == "hard":
-                weapon_types = ["normal", "spread"]  # No bouncing bullets in hard mode
+                weapon_types = ["normal", "spread"]  # No special bullets in hard mode
             else:
-                weapon_types = ["normal", "spread", "bouncing"]
+                weapon_types = ["normal", "spread", "bouncing", "homing"]
                 
             if player.weapon_level < 3:
                 player.weapon_level += 1
@@ -1419,6 +1536,10 @@ while running:
     if game_state.state == "playing":
         all_sprites.update()
         
+        # Check player health - switch to game over if health is zero or negative
+        if player.health <= 0:
+            game_state.state = "game_over"
+            
         # Periodically remove sprites that are far off screen
         cleanup_sprites()
         
