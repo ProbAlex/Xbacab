@@ -822,117 +822,194 @@ class Enemy(pygame.sprite.Sprite):
         self.rect.y = random.randrange(-150, -50)
         
     def update(self):
-        # Update enemy position and shooting logic
+        # Store previous position to calculate momentum
+        prev_x = self.rect.x
+        prev_y = self.rect.y
+        
         now = pygame.time.get_ticks()
         
-        # Basic enemy just moves downward
-        if self.enemy_type in ["basic", "elite"]:
+        # Movement based on enemy type
+        if self.enemy_type == "basic":
+            # Basic enemies just move downward at a constant speed
             self.rect.y += self.speed
             
-        # Cloaked Ambusher behavior
+        elif self.enemy_type == "elite":
+            # Elite enemies move in a slight side-to-side pattern while moving down
+            self.rect.y += self.speed
+            # Add sine wave horizontal movement
+            self.rect.x += math.sin(now / 500) * 2
+            
+            # Keep within screen boundaries
+            if self.rect.left < 0:
+                self.rect.left = 0
+            elif self.rect.right > WIDTH:
+                self.rect.right = WIDTH
+            
         elif self.enemy_type == "cloaked_ambusher":
+            # Cloaked ambusher moves downward, occasionally cloaking
             self.rect.y += self.speed
             
             # Handle cloaking
-            if self.visible and now - self.cloak_start > self.cloak_timer:
-                # Start cloaking
-                self.visible = False
-                self.cloak_start = now
-                # Make semi-transparent
-                self.image = self.original_image.copy()
-                self.image.set_alpha(30)  # Almost invisible
-            elif not self.visible and now - self.cloak_start > self.cloak_duration:
-                # Uncloak
-                self.visible = True
-                self.cloak_start = now
-                self.cloak_timer = random.randint(2000, 4000)  # Time until next cloak
-                self.image = self.original_image.copy()
-                self.image.set_alpha(255)  # Fully visible
+            if hasattr(self, 'visible'):
+                if self.visible and now - self.cloak_start > self.cloak_timer:
+                    # Start cloaking
+                    self.visible = False
+                    self.cloak_start = now
+                    # Make semi-transparent
+                    self.image.set_alpha(30)  # Almost invisible
+                elif not self.visible and now - self.cloak_start > self.cloak_duration:
+                    # Uncloak
+                    self.visible = True
+                    self.cloak_start = now
+                    self.cloak_timer = random.randint(2000, 4000)  # Time until next cloak
+                    self.image.set_alpha(255)  # Fully visible
+                    
+                    # Burst attack when uncloaking
+                    if hasattr(self, 'burst_active'):
+                        self.burst_active = True
+                        self.burst_shots = 0
+                        self.last_shot = now
                 
-                # Burst attack when uncloaking
-                self.burst_active = True
-                self.burst_shots = 0
-                self.last_shot = now
+                # Handle burst fire
+                if hasattr(self, 'burst_active') and self.burst_active and now - self.last_shot > self.burst_delay:
+                    self.shoot_cloaked_ambusher()
+                    self.burst_shots += 1
+                    self.last_shot = now
+                    
+                    # End burst after enough shots
+                    if self.burst_shots >= self.burst_count:
+                        self.burst_active = False
             
-            # Handle burst fire
-            if self.burst_active and now - self.last_shot > self.burst_delay:
-                self.shoot()
-                self.burst_shots += 1
-                self.last_shot = now
-                
-                # End burst after enough shots
-                if self.burst_shots >= self.burst_count:
-                    self.burst_active = False
-            
-        # Splitter Drone behavior
         elif self.enemy_type == "splitter_drone":
-            # Just move down, splitting happens in hit() method
+            # Splitter drone moves downward, splitting happens in hit() method
             self.rect.y += self.speed
             
-        # Shield Bearer behavior
         elif self.enemy_type == "shield_bearer":
+            # Shield bearer moves downward with shield protection
             self.rect.y += self.speed
             
             # Regenerate shield if it's active
-            if self.shield_active and self.shield_health < self.shield_max_health:
-                self.shield_health = min(self.shield_max_health, self.shield_health + self.shield_regen_rate)
+            if hasattr(self, 'shield_active') and self.shield_active:
+                if hasattr(self, 'shield_health') and hasattr(self, 'shield_max_health') and hasattr(self, 'shield_regen_rate'):
+                    self.shield_health = min(self.shield_max_health, self.shield_health + self.shield_regen_rate)
                 
             # Check if shield should be disabled/enabled
-            if self.shield_active and self.shield_health <= 0:
-                self.shield_active = False
-            elif not self.shield_active and self.shield_health > self.shield_max_health * 0.3:
-                self.shield_active = True
+            if hasattr(self, 'shield_active') and hasattr(self, 'shield_health'):
+                if self.shield_active and self.shield_health <= 0:
+                    self.shield_active = False
+                elif not self.shield_active and hasattr(self, 'shield_max_health') and self.shield_health > self.shield_max_health * 0.3:
+                    self.shield_active = True
                 
-        # Energy Sapper behavior
         elif self.enemy_type == "energy_sapper":
-            self.rect.y += self.speed * 0.7  # Move slowly
+            # Energy sapper moves slowly
+            self.rect.y += self.speed * 0.7
             
             # Check if we should start/stop the beam
-            if not self.beam_active and now - self.last_shot > self.shoot_delay:
-                self.beam_active = True
-                self.beam_start = now
-                self.last_shot = now
-            elif self.beam_active and now - self.beam_start > self.beam_duration:
-                self.beam_active = False
+            if hasattr(self, 'beam_active'):
+                if not self.beam_active and now - self.last_shot > self.shoot_delay:
+                    self.beam_active = True
+                    self.beam_start = now
+                    self.last_shot = now
+                elif self.beam_active and hasattr(self, 'beam_start') and hasattr(self, 'beam_duration') and now - self.beam_start > self.beam_duration:
+                    self.beam_active = False
                 
-            # If beam is active, look for player to target
-            if self.beam_active and player.rect.centerx > self.rect.left and player.rect.centerx < self.rect.right:
-                if player.rect.top > self.rect.bottom:
-                    self.beam_target = player
-                    
-                    # If player is in beam, drain energy or reduce fire rate
-                    if self.beam_target.energy > 0:
-                        self.beam_target.energy = max(0, self.beam_target.energy - 0.5)
-                    elif self.beam_target.shoot_delay < 500:
-                        self.beam_target.shoot_delay += 1  # Slowly increase shoot delay (reduce fire rate)
-            else:
-                self.beam_target = None
+                # If beam is active, look for player to target
+                if self.beam_active and player.rect.centerx > self.rect.left and player.rect.centerx < self.rect.right:
+                    if player.rect.top > self.rect.bottom:
+                        # If player is in beam, drain energy
+                        if player.energy > 0:
+                            player.energy = max(0, player.energy - 0.5)
+                        elif player.shoot_delay < 500:
+                            player.shoot_delay += 1  # Slowly increase shoot delay (reduce fire rate)
                 
-        # Blade Spinner behavior
         elif self.enemy_type == "blade_spinner":
-            # Spinning orbit movement
-            if self.orbit_center is None:
-                # Set orbit center at first update
-                self.orbit_center = (self.rect.centerx, self.rect.centery + 200)
+            # Blade spinner moves in a spinning orbit while drifting downward
+            if hasattr(self, 'orbit_angle') and hasattr(self, 'orbit_speed'):
+                self.orbit_angle += self.orbit_speed
                 
-            # Update orbit angle
-            self.orbit_angle += self.orbit_speed
+                # Calculate orbit position
+                if hasattr(self, 'orbit_radius'):
+                    orbit_x = math.cos(self.orbit_angle) * self.orbit_radius
+                    orbit_y = math.sin(self.orbit_angle) * self.orbit_radius
+                    
+                    # Update base position (drifting downward)
+                    if hasattr(self, 'base_y'):
+                        self.base_y += self.speed * 0.8
+                        
+                        # Set actual position with orbit offset
+                        if hasattr(self, 'base_x'):
+                            self.rect.centerx = int(self.base_x + orbit_x)
+                            self.rect.centery = int(self.base_y + orbit_y)
+                            
+                            # Keep within screen boundaries
+                            if self.rect.left < 0:
+                                self.rect.left = 0
+                                self.base_x = self.rect.centerx
+                            elif self.rect.right > WIDTH:
+                                self.rect.right = WIDTH 
+                                self.base_x = self.rect.centerx
+                    else:
+                        # If base position not set, initialize it
+                        self.base_x = self.rect.centerx
+                        self.base_y = self.rect.centery
+                        # And continue with basic downward movement for this frame
+                        self.rect.y += self.speed * 0.8
+                else:
+                    # Initialize orbit radius if missing
+                    self.orbit_radius = 40 + random.randint(0, 30)
+            else:
+                # Initialize orbit parameters if missing
+                self.orbit_angle = random.random() * math.pi * 2
+                self.orbit_speed = 0.05 + (random.random() * 0.05)
+                self.orbit_radius = 40 + random.randint(0, 30)
+                self.base_x = self.rect.centerx
+                self.base_y = self.rect.centery
+                # Basic movement for this frame
+                self.rect.y += self.speed
+                
+            # Rotate blade if attribute exists
+            if hasattr(self, 'blade_angle'):
+                self.blade_angle += 5
+                if self.blade_angle >= 360:
+                    self.blade_angle = 0
+            else:
+                self.blade_angle = 0
+        
+        # Ensure all enemies stay within horizontal screen boundaries regardless of type
+        if self.rect.right > WIDTH:
+            self.rect.right = WIDTH
+        if self.rect.left < 0:
+            self.rect.left = 0
+                
+        # Calculate momentum (recent movement speed)
+        self.momentum_x = self.rect.x - prev_x
+        self.momentum_y = self.rect.y - prev_y
             
-            # Calculate new position
-            self.rect.centerx = self.orbit_center[0] + int(math.cos(self.orbit_angle) * self.orbit_radius)
-            self.rect.centery = self.orbit_center[1] + int(math.sin(self.orbit_angle) * self.orbit_radius)
+        # Check if off bottom of screen
+        if self.rect.top > HEIGHT:
+            self.kill()
             
-            # Also drift downward slowly
-            self.orbit_center = (self.orbit_center[0], self.orbit_center[1] + self.speed * 0.1)
-            
-            # Spin the blade
-            self.angle += self.spin_speed
-            self.image = pygame.transform.rotate(self.original_image, self.angle)
-            self.rect = self.image.get_rect(center=self.rect.center)  # Keep center position
-            
-        # Check if it's time to shoot
-        if now - self.last_shot > self.shoot_delay and not (self.enemy_type == "cloaked_ambusher" and self.burst_active):
-            self.shoot()
+        # Shooting logic
+        if now - self.last_shot > self.shoot_delay:
+            # Different shooting methods based on enemy type
+            if self.enemy_type == "basic":
+                self.shoot()
+            elif self.enemy_type == "elite":
+                self.shoot()  # Elite enemies use the same shooting pattern but more frequently
+            elif self.enemy_type == "cloaked_ambusher":
+                # Handled in the cloaked_ambusher logic above with burst fire
+                if hasattr(self, 'visible') and self.visible and not (hasattr(self, 'burst_active') and self.burst_active):
+                    self.shoot_cloaked_ambusher()
+            elif self.enemy_type == "splitter_drone":
+                self.shoot_splitter_drone()
+            elif self.enemy_type == "shield_bearer":
+                self.shoot_shield_bearer()
+            elif self.enemy_type == "energy_sapper":
+                if not (hasattr(self, 'beam_active') and self.beam_active):
+                    self.shoot_energy_sapper()
+            elif self.enemy_type == "blade_spinner":
+                self.shoot_blade_spinner()
+                
             self.last_shot = now
     
     def shoot(self):
@@ -1124,15 +1201,40 @@ class EnemyBullet(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
         self.rect.centerx = x
         self.rect.top = y
-        self.speedy = 5
+        
+        # Base speed
+        self.base_speed = 5
+        
+        # Add owner's speed if available
+        self.speedx = 0
+        self.speedy = self.base_speed
+        
+        if owner:
+            # Check for momentum tracking (used by Boss)
+            if hasattr(owner, 'momentum_x') and hasattr(owner, 'momentum_y'):
+                self.speedx += owner.momentum_x * 0.7  # 70% of owner's horizontal momentum
+                self.speedy += self.base_speed + (abs(owner.momentum_y) * 0.5)  # Add momentum to base speed
+            # Check for standard speed attributes
+            elif hasattr(owner, 'speed'):
+                # Add a portion of the owner's speed to the bullet
+                self.speedy += owner.speed * 0.5  # 50% of owner's speed
+                
+            if hasattr(owner, 'speedx') and not hasattr(owner, 'momentum_x'):
+                # Add a portion of the owner's horizontal speed
+                self.speedx += owner.speedx * 0.5  # 50% of owner's horizontal speed
+            
         self.damage = 5
         self.owner = owner  # Store reference to the enemy that fired this bullet
         
     def update(self):
         self.rect.y += self.speedy
-        # Kill if it moves off the bottom of the screen
-        if self.rect.top > HEIGHT:
+        self.rect.x += self.speedx
+        
+        # Kill if it moves off the screen
+        if (self.rect.top > HEIGHT or self.rect.bottom < 0 or 
+            self.rect.right < 0 or self.rect.left > WIDTH):
             self.kill()
+            
         # Remove reference from owner's bullet list when bullet is destroyed
         if self.owner and not self.alive():
             if self in self.owner.bullets:
@@ -1147,9 +1249,34 @@ class EnemySpreadBullet(pygame.sprite.Sprite):
         self.rect.centerx = x
         self.rect.top = y
         self.angle = math.radians(angle)
+        
+        # Store base speed and calculate components
+        self.base_speed = speed
         self.speed = speed
-        self.speedy = speed * math.cos(self.angle)
-        self.speedx = speed * math.sin(self.angle)
+        
+        # Factor in owner's speed if available
+        if owner:
+            # Check for momentum tracking (used by Boss)
+            if hasattr(owner, 'momentum_x') and hasattr(owner, 'momentum_y'):
+                # Momentum is already applied in the Boss's shoot method
+                pass
+            # Check for standard speed attributes
+            elif hasattr(owner, 'speed'):
+                # Add a portion of the owner's vertical speed
+                self.speed += owner.speed * 0.5  # 50% of owner's speed
+                
+            if hasattr(owner, 'speedx') and hasattr(owner, 'speedy'):
+                # For enemies with separate x and y speeds, adjust angle slightly based on movement
+                # This creates a more realistic firing arc when moving horizontally
+                if abs(owner.speedx) > 0.5:  # Only if moving horizontally with some speed
+                    # Adjust angle slightly in the direction of movement (max 15 degrees)
+                    angle_adjustment = min(15, max(-15, owner.speedx * 3))
+                    self.angle = math.radians(angle + angle_adjustment)
+        
+        # Calculate velocity components
+        self.speedy = self.speed * math.cos(self.angle)
+        self.speedx = self.speed * math.sin(self.angle)
+        
         self.damage = damage
         self.owner = owner  # Store reference to the enemy that fired this bullet
         # Initialize spiral properties (will be set later if needed)
@@ -1181,10 +1308,6 @@ class EnemySpreadBullet(pygame.sprite.Sprite):
         # Kill if it moves off the screen
         if self.rect.bottom < 0 or self.rect.top > HEIGHT or self.rect.left > WIDTH or self.rect.right < 0:
             self.kill()
-        # Remove reference from owner's bullet list when bullet is destroyed
-        if self.owner and not self.alive():
-            if self in self.owner.bullets:
-                self.owner.bullets.remove(self)
 
 # PowerUp class
 class PowerUp(pygame.sprite.Sprite):
@@ -1311,54 +1434,83 @@ class Boss(pygame.sprite.Sprite):
         self.pattern = 0  # Current attack pattern
         self.pattern_timer = pygame.time.get_ticks()
         self.pattern_delay = 5000  # Change patterns every 5 seconds
-        self.speed = 2
+        
+        # Base speed attributes - scale with difficulty and sector
+        self.base_speed = 2 + (sector * 0.2)  # Slightly faster in higher sectors
+        self.speed = self.base_speed * difficulty_multipliers[game_state.difficulty]
+        
+        # Initial speed direction
         self.speedx = self.speed
         self.speedy = 0
-        self.score_value = sector * 500  # More points for later bosses
         
+        # Movement momentum tracking - helps with smoother projectile physics
+        self.momentum_x = 0  # Tracks recent movement for more natural projectile physics
+        self.momentum_y = 0
+        
+        self.score_value = sector * 500  # More points for later bosses
+    
     def update(self):
         # Boss movement patterns
         now = pygame.time.get_ticks()
+        
+        # Store previous position to calculate momentum
+        prev_x = self.rect.x
+        prev_y = self.rect.y
         
         # Change attack pattern periodically
         if now - self.pattern_timer > self.pattern_delay:
             self.pattern = (self.pattern + 1) % 3  # Cycle through 3 patterns
             self.pattern_timer = now
             
-        # Basic movement
+        # Boss movement based on pattern
         if self.pattern == 0:
-            # Move back and forth horizontally
+            # Pattern 0: Move back and forth horizontally
             self.rect.x += self.speedx
             if self.rect.right > WIDTH or self.rect.left < 0:
                 self.speedx *= -1
         elif self.pattern == 1:
-            # Move in a figure-8 pattern
+            # Pattern 1: Move in a figure-8 pattern
             self.rect.x += self.speedx
             self.rect.y += self.speedy
             if self.rect.right > WIDTH - 50 or self.rect.left < 50:
                 self.speedx *= -1
-                self.speedy = self.speedx  # Change vertical direction when hitting horizontal bounds
+                # When changing horizontal direction, also change vertical direction
+                self.speedy = self.speedx  # This creates the figure-8 pattern
             if self.rect.top < 50 or self.rect.bottom > HEIGHT // 3:
                 self.speedy *= -1
         else:  # pattern == 2
-            # Charge toward player's x position
+            # Pattern 2: Charge toward player's x position
             if player.rect.centerx > self.rect.centerx:
                 self.rect.x += self.speed * 1.5
+                self.speedx = self.speed * 1.5
             elif player.rect.centerx < self.rect.centerx:
                 self.rect.x -= self.speed * 1.5
+                self.speedx = -self.speed * 1.5
+            else:
+                self.speedx = 0
             
-            # Small vertical movement
-            self.rect.y += math.sin(pygame.time.get_ticks() / 500) * 2
+            # Add a small vertical movement using sine wave
+            vertical_move = math.sin(now / 500) * 2
+            self.rect.y += vertical_move
+            self.speedy = vertical_move
+            
+        # Calculate momentum (recent movement speed)
+        self.momentum_x = self.rect.x - prev_x
+        self.momentum_y = self.rect.y - prev_y
             
         # Stay within bounds
         if self.rect.right > WIDTH:
             self.rect.right = WIDTH
+            self.speedx = -abs(self.speedx)  # Reverse direction when hitting wall
         if self.rect.left < 0:
             self.rect.left = 0
+            self.speedx = abs(self.speedx)  # Reverse direction when hitting wall
         if self.rect.top < 10:
             self.rect.top = 10
+            self.speedy = abs(self.speedy)  # Reverse direction when hitting ceiling
         if self.rect.bottom > HEIGHT // 2:
             self.rect.bottom = HEIGHT // 2
+            self.speedy = -abs(self.speedy)  # Reverse direction when hitting floor
             
         # Shooting based on pattern
         if now - self.last_shot > self.shoot_delay:
@@ -1367,8 +1519,10 @@ class Boss(pygame.sprite.Sprite):
             
     def shoot(self):
         if self.pattern == 0:
-            # Simple spread pattern
-            for angle in range(-45, 46, 15):
+            # Simple spread pattern - only horizontally and downward
+            for angle in [-45, -30, -15, 0, 15, 30, 45]:
+                # In our coordinate system, only bullets with positive speedy go downward
+                # cos(0) = 1, so a 0 angle goes straight down
                 bullet = EnemySpreadBullet(
                     self.rect.centerx,   # x
                     self.rect.bottom,    # y
@@ -1377,14 +1531,23 @@ class Boss(pygame.sprite.Sprite):
                     PURPLE,              # color
                     8,                   # size
                     15,                  # damage
-                    6                    # speed
+                    6 + abs(self.momentum_x) * 0.3  # speed + momentum factor
                 )
+                
+                # Add momentum to bullet trajectory
+                bullet.speedx += self.momentum_x * 0.7  # 70% of boss's horizontal momentum
+                
+                # Ensure bullet goes downward by forcing speedy to be positive
+                if bullet.speedy < 0:
+                    bullet.speedy = -bullet.speedy  # Reverse if it would go upward
+                
                 all_sprites.add(bullet)
                 enemy_bullets.add(bullet)
                 self.bullets.append(bullet)  # Track this bullet
+                
         elif self.pattern == 1:
-            # Circular pattern
-            for angle in range(0, 360, 30):
+            # Modified pattern - only shoot downward with wider spread
+            for angle in range(-90, 91, 30):  # -90 to 90 degrees range
                 bullet = EnemySpreadBullet(
                     self.rect.centerx,   # x
                     self.rect.centery,   # y
@@ -1393,26 +1556,50 @@ class Boss(pygame.sprite.Sprite):
                     PURPLE,              # color
                     8,                   # size
                     15,                  # damage
-                    6                    # speed
+                    6 + (abs(self.momentum_x) + abs(self.momentum_y)) * 0.25  # speed + momentum factor
                 )
+                
+                # Add momentum to bullet trajectory
+                bullet.speedx += self.momentum_x * 0.6  # 60% of boss's horizontal momentum
+                
+                # Ensure bullet goes downward or horizontally
+                if bullet.speedy < 0:
+                    bullet.speedy = 0  # Make it go horizontally instead of upward
+                
                 all_sprites.add(bullet)
                 enemy_bullets.add(bullet)
                 self.bullets.append(bullet)  # Track this bullet
+                
         elif self.pattern == 2:
-            # Aimed pattern
-            angle = math.degrees(math.atan2(player.rect.centery - self.rect.centery, 
-                                            player.rect.centerx - self.rect.centerx))
+            # Aimed pattern - ensure it's only aimed horizontally or downward
+            target_y = max(player.rect.centery, self.rect.centery + 50)  # Force target to be below boss
+            angle = math.degrees(math.atan2(target_y - self.rect.centery, 
+                                          player.rect.centerx - self.rect.centerx))
+            
+            # Calculate bullet speed based on boss momentum and pattern
+            # Pattern 2 is more aggressive, so bullets are faster
+            bullet_speed = 7 + (abs(self.momentum_x) + abs(self.momentum_y)) * 0.4
+            
             for i in range(-2, 3):
                 bullet = EnemySpreadBullet(
                     self.rect.centerx,   # x
                     self.rect.bottom,    # y
-                    angle + (i * 10) + 90,  # angle
+                    angle + (i * 10) + 90,  # angle - 90 degree offset makes 0 angle point downward
                     self,                # owner
                     PURPLE,              # color
                     8,                   # size
                     15,                  # damage
-                    6                    # speed
+                    bullet_speed         # speed with momentum factor
                 )
+                
+                # Add momentum to bullet trajectory - more in pattern 2 for "charging" effect
+                bullet.speedx += self.momentum_x * 0.8  # 80% of boss's horizontal momentum
+                bullet.speedy += self.momentum_y * 0.5  # 50% of boss's vertical momentum
+                
+                # Double-check to make absolutely sure no bullets go upward
+                if bullet.speedy < 0:
+                    bullet.speedy = abs(bullet.speedy)  # Force to be positive (downward)
+                
                 all_sprites.add(bullet)
                 enemy_bullets.add(bullet)
                 self.bullets.append(bullet)  # Track this bullet
@@ -1424,7 +1611,7 @@ class Boss(pygame.sprite.Sprite):
                 enemy.rect.top = self.rect.bottom
                 all_sprites.add(enemy)
                 enemies.add(enemy)
-                
+    
     def hit(self, damage):
         self.health -= damage
         if self.health <= 0 and not self.dying:
@@ -1540,16 +1727,28 @@ class GameState:
         self.difficulty_multiplier = 1.0
         
     def reset(self):
-        self.state = "menu"
+        # Store the previous state to debug issues
+        prev_state = self.state if hasattr(self, 'state') else "unknown"
+        
+        # Explicitly set all attributes to their initial values
+        self.state = "menu"  # Force to menu state
         self.sector = 1
         self.wave = 1
         self.score = 0
         self.combo = 1
+        self.max_combo = 1
         self.resources = 0
         self.boss_fight = False
         self.wave_enemies = 5
         self.waves_per_sector = 5  # Waves to complete before boss
         self.bosses_defeated = 0  # Reset boss defeat counter
+        
+        # Make sure difficulty persists
+        if not hasattr(self, 'difficulty'):
+            self.difficulty = "normal"  # Default difficulty
+            
+        # Track changes for debugging
+        print(f"GameState reset: {prev_state} -> {self.state}")
         
         # Clear endless mode
         if hasattr(self, 'endless_mode'):
@@ -1573,6 +1772,8 @@ class GameState:
             # Boss wave in endless mode
             print(f"Triggering boss wave in endless mode sector {self.sector}")
             self.boss_fight = True
+            # Set a flag to indicate we want a random boss
+            self.use_random_boss = True
             return True
         elif self.wave > self.waves_per_sector:
             # Normal boss wave
@@ -1960,6 +2161,35 @@ def cleanup_sprites():
                 sprite.rect.left > WIDTH + 100):
                 sprite.kill()
 
+def create_random_boss(current_sector):
+    """Create a random boss for endless mode.
+    Instead of using the current sector's boss, this selects a random boss from sectors 1-6.
+    The stats will still be enhanced based on the current endless mode sector.
+    """
+    # Select a random boss type from sectors 1-6
+    boss_sector = random.randint(1, 6)
+    print(f"Creating random boss from sector {boss_sector} for endless mode sector {current_sector}")
+    
+    # Create the boss with the random visual style and base stats
+    boss = Boss(boss_sector)
+    
+    # Now enhance the stats based on current endless mode sector
+    if current_sector > 6:
+        # In endless mode, enhance boss based on current sector
+        health_multiplier = 1 + (current_sector - 6) * 0.3  # +30% health per sector above 6
+        boss.max_health *= health_multiplier
+        boss.health = boss.max_health
+        boss.shoot_delay = max(100, boss.shoot_delay * 0.8)  # Faster shooting (min 100ms)
+        boss.score_value = 500 + (current_sector - 6) * 300  # More points in higher sectors
+        
+        # Add a suffix to the name to indicate it's powered up
+        boss.name += f" [Endless Lv.{current_sector-6}]"
+    
+    # Note: The modified shoot method in the Boss class ensures no bullets go upward
+    # No additional changes needed here as all Boss instances use the same shoot method
+    
+    return boss
+
 def spawn_shop_portal(x, y):
     """Spawn a shop portal at the given coordinates.
     This function can be called by any entity when a shop portal should appear.
@@ -2168,13 +2398,16 @@ while running:
                     enemies.add(mini_boss)
                     print(f"Second check - Spawned mini-boss for sector {game_state.sector}")
                 else:
-                    boss = Boss(game_state.sector)
-                    health_multiplier = 1 + (game_state.sector - 6) * 0.3
-                    boss.max_health *= health_multiplier
-                    boss.health = boss.max_health
+                    # Spawn regular boss - enhanced in endless mode
+                    if hasattr(game_state, 'endless_mode') and game_state.endless_mode and game_state.sector > 6:
+                        # Use random boss in endless mode
+                        boss = create_random_boss(game_state.sector)
+                    else:
+                        # Normal progression - use sector-specific boss
+                        boss = Boss(game_state.sector)
+                    
                     all_sprites.add(boss)
                     bosses.add(boss)
-                    print(f"Second check - Spawned boss for sector {game_state.sector}")
                 
                 game_state.wave = 1  # Reset wave counter
                 continue
@@ -2183,18 +2416,27 @@ while running:
             if game_state.next_wave():
                 # Boss fight time!
                 
+                # Check if we should use random boss in endless mode
+                use_random_boss = (hasattr(game_state, 'endless_mode') and 
+                                 game_state.endless_mode and 
+                                 game_state.sector > 6)
+                
                 # In endless mode (after sector 6), sometimes spawn mini-boss instead
-                if game_state.sector > 6 and random.random() < 0.4 and not hasattr(game_state, 'endless_mode'):  # Only execute in regular game mode
+                if use_random_boss and random.random() < 0.4:
                     # This is handled by our special case above in endless mode
                     mini_boss = BarrierGoliath(WIDTH, HEIGHT, game_state, all_sprites, enemies, enemy_bullets, powerups, PowerUp, EnemySpreadBullet)
                     mini_boss.max_health *= 1 + (game_state.sector - 6) * 0.2  # +20% health per sector above 6
                     mini_boss.health = mini_boss.max_health
                     all_sprites.add(mini_boss)
                     enemies.add(mini_boss)
-                elif not hasattr(game_state, 'endless_mode'):  # Only execute in regular game mode
-                    # This is handled by our special case above in endless mode
+                    # Ensure we don't spawn regular enemies during a boss wave
+                    game_state.boss_fight = True
+                    print(f"Spawned mini-boss for endless sector {game_state.sector}")
+                elif not use_random_boss:  # Regular game mode or early endless sectors
+                    # In regular game mode, always use the correct sector boss
+                    # Mini-bosses don't replace sector bosses in normal progression
                     boss = Boss(game_state.sector)
-                    if game_state.sector > 6:
+                    if hasattr(game_state, 'endless_mode') and game_state.endless_mode and game_state.sector > 6:
                         health_multiplier = 1 + (game_state.sector - 6) * 0.3  # +30% health per sector above 6
                         boss.max_health *= health_multiplier
                         boss.health = boss.max_health
@@ -2202,11 +2444,27 @@ while running:
                         boss.score_value = 500 + (game_state.sector - 6) * 300  # More points in higher sectors
                     all_sprites.add(boss)
                     bosses.add(boss)
-                
-                game_state.boss_fight = True
+                    # Ensure we don't spawn regular enemies during a boss wave
+                    game_state.boss_fight = True
+                    print(f"Spawned sector {game_state.sector} boss")
+                else: # This is the else for the use_random_boss and random.random() check
+                    # Create a random boss for endless mode
+                    boss = create_random_boss(game_state.sector)
+                    all_sprites.add(boss)
+                    bosses.add(boss)
+                    # Ensure we don't spawn regular enemies during a boss wave
+                    game_state.boss_fight = True
+                    print(f"Created random boss from pool for endless sector {game_state.sector}")
             else:
-                # Spawn more enemies
+                # Not a boss wave, spawn regular enemies
+                if game_state.boss_fight:
+                    # This shouldn't happen, but if it does, reset the flag
+                    game_state.boss_fight = False
+                    print(f"Resetting boss_fight flag in wave {game_state.wave}")
+                
+                # Spawn new wave of enemies
                 for i in range(game_state.wave_enemies):
+                    # Choose enemy type based on wave and sector
                     enemy_roll = random.random()
                     
                     # Use a weighted selection system for different enemy types
@@ -2224,14 +2482,26 @@ while running:
                         enemy = Enemy("blade_spinner")
                     else:  # 35% chance of basic enemy
                         enemy = Enemy("basic")
+                        
+                    # Place it randomly at the top of the screen with some spacing
+                    enemy.rect.x = random.randint(0 + enemy.rect.width, WIDTH - enemy.rect.width)
+                    enemy.rect.bottom = random.randint(-150, -20)
                     all_sprites.add(enemy)
                     enemies.add(enemy)
                 
                 # Chance to spawn a mini-boss (Barrier Goliath) after wave 3
-                if game_state.wave > 3 and game_state.wave < game_state.waves_per_sector and random.random() < 0.15:  # 15% chance per wave after wave 3
-                    mini_boss = BarrierGoliath(WIDTH, HEIGHT, game_state, all_sprites, enemies, enemy_bullets, powerups, PowerUp, EnemySpreadBullet)
-                    all_sprites.add(mini_boss)
-                    enemies.add(mini_boss)
+                # Only if this is not a boss wave
+                if game_state.wave > 3 and game_state.wave < game_state.waves_per_sector and random.random() < 0.15 and not game_state.boss_fight:
+                    # Make sure we don't have too many enemies
+                    if len(enemies) > 10:
+                        # Too many enemies already - skip mini-boss for this wave
+                        print(f"Skipping mini-boss spawn - too many enemies ({len(enemies)})")
+                    else:
+                        print(f"Spawning mini-boss during wave {game_state.wave}")
+                        mini_boss = BarrierGoliath(WIDTH, HEIGHT, game_state, all_sprites, enemies, enemy_bullets, powerups, PowerUp, EnemySpreadBullet)
+                        all_sprites.add(mini_boss)
+                        enemies.add(mini_boss)
+                        # Note: We don't set boss_fight to True here since this isn't a boss wave
     
     # Draw / render
     screen.fill(BLACK)
@@ -2252,20 +2522,50 @@ while running:
         
         # Start Game button
         if draw_button(gameplay_surface, "Start Game", 30, WIDTH/2, button_y, button_width, button_height):
+            # Set up for a new game with the current difficulty
             game_state.state = "playing"
+            game_state.sector = 1  # Start at sector 1
+            game_state.wave = 1
+            # Remove endless mode if it was set previously
+            if hasattr(game_state, 'endless_mode'):
+                delattr(game_state, 'endless_mode')
+                
+            print(f"Starting new game with difficulty: {game_state.difficulty}")
+            # We don't call show_difficulty_screen() directly to avoid the issue
         
         # Endless Mode button
         if draw_button(gameplay_surface, "Endless Mode", 30, WIDTH/2, button_y + spacing, button_width, button_height):
-            # Set up for endless mode
+            # Set up for endless mode - first ensure clean state
+            print("Initializing Endless Mode...")
+            
+            # Clear any existing sprite groups to prevent state issues
+            all_sprites.empty()
+            bullets.empty()
+            enemy_bullets.empty()
+            enemies.empty()
+            powerups.empty()
+            bosses.empty()
+            shop_portals.empty()
+            
+            # Reset game state for endless mode
             game_state.state = "playing"
             game_state.sector = 7  # Start at sector 7 (beyond sector 6)
             game_state.wave = 1
+            game_state.score = 0
+            game_state.combo = 1
+            game_state.max_combo = 1
+            
+            # Ensure endless mode flag is set
             game_state.endless_mode = True
             game_state.waves_per_sector = 4  # Fewer waves before boss fights
             game_state.bosses_defeated = 6  # Ensure drone slot upgrades are available
             game_state.resources = 1000  # Give extra starting resources for upgrades
+            game_state.boss_fight = False  # Ensure no boss fight initially
             
-            # Create a powerful starter player for endless mode
+            # Create a completely new player instance to avoid state issues
+            player = Player()
+            
+            # Set up powerful player for endless mode
             player.max_health = 200
             player.health = 200
             player.max_energy = 150
@@ -2273,10 +2573,32 @@ while running:
             player.energy_regen = 0.7
             player.weapon_level = 3  # Start with level 3 weapons
             
+            # Add player to sprites
+            all_sprites.add(player)
+            
             # Start with 2 drones
             player.max_drones = 4
+            player.drone_list = []  # Initialize empty drone list
             for i in range(2):
                 player.add_drone()
+                
+            # Spawn initial enemies for endless mode
+            for i in range(game_state.wave_enemies):
+                # Create a mix of enemy types for endless mode
+                enemy_roll = random.random()
+                if enemy_roll < 0.6:  # 60% chance of more challenging enemies
+                    enemy_type = random.choice(["elite", "cloaked_ambusher", "splitter_drone", 
+                                              "shield_bearer", "energy_sapper", "blade_spinner"])
+                else:
+                    enemy_type = "basic"
+                    
+                enemy = Enemy(enemy_type)
+                enemy.rect.x = random.randint(0 + enemy.rect.width, WIDTH - enemy.rect.width)
+                enemy.rect.bottom = random.randint(-150, -20)
+                all_sprites.add(enemy)
+                enemies.add(enemy)
+                
+            print("Endless Mode initialized successfully")
         
         # Controls button
         if draw_button(gameplay_surface, "Controls", 30, WIDTH/2, button_y + spacing*2, button_width, button_height):
@@ -2284,7 +2606,15 @@ while running:
             
         # Difficulty button
         if draw_button(gameplay_surface, "Difficulty", 30, WIDTH/2, button_y + spacing*3, button_width, button_height):
-            show_difficulty_screen()
+            # Check if we should skip the difficulty screen (for game over transitions)
+            if hasattr(game_state, 'skip_difficulty') and game_state.skip_difficulty:
+                # We've just come from the game over screen, skip showing difficulty
+                print("Skipping difficulty screen due to game over transition")
+                # Remove the flag now that we've used it
+                delattr(game_state, 'skip_difficulty')
+            else:
+                # Normal case - show difficulty screen
+                show_difficulty_screen()
         
         # Display current difficulty
         draw_text(gameplay_surface, f"Current Difficulty: {game_state.difficulty.capitalize()}", 18, WIDTH / 2, HEIGHT - 50)
@@ -2365,33 +2695,51 @@ while running:
                     enemies.add(mini_boss)
                     print(f"Second check - Spawned mini-boss for sector {game_state.sector}")
                 else:
-                    boss = Boss(game_state.sector)
-                    health_multiplier = 1 + (game_state.sector - 6) * 0.3
-                    boss.max_health *= health_multiplier
-                    boss.health = boss.max_health
-                    all_sprites.add(boss)
-                    bosses.add(boss)
-                    print(f"Second check - Spawned boss for sector {game_state.sector}")
-                
-                game_state.wave = 1  # Reset wave counter
-                continue
+                    # Spawn regular boss - enhanced in endless mode
+                    if hasattr(game_state, 'endless_mode') and game_state.endless_mode and game_state.sector > 6:
+                        # Use random boss in endless mode
+                        boss = create_random_boss(game_state.sector)
+                        print(f"Random boss created for endless sector {game_state.sector}")
+                    else:
+                        # Normal progression - use sector-specific boss
+                        boss = Boss(game_state.sector)
+                        if game_state.sector > 6:
+                            health_multiplier = 1 + (game_state.sector - 6) * 0.3  # +30% health per sector above 6
+                            boss.max_health *= health_multiplier
+                            boss.health = boss.max_health
+                            boss.shoot_delay = max(300, boss.shoot_delay * 0.8)  # Faster shooting (min 300ms)
+                            boss.score_value = 500 + (game_state.sector - 6) * 300  # More points in higher sectors
+                        all_sprites.add(boss)
+                        bosses.add(boss)
+                    
+                    game_state.wave = 1  # Reset wave counter
+                    continue
             
             # Standard wave progression
             if game_state.next_wave():
                 # Boss fight time!
                 
+                # Check if we should use random boss in endless mode
+                use_random_boss = (hasattr(game_state, 'endless_mode') and 
+                                 game_state.endless_mode and 
+                                 game_state.sector > 6)
+                
                 # In endless mode (after sector 6), sometimes spawn mini-boss instead
-                if game_state.sector > 6 and random.random() < 0.4 and not hasattr(game_state, 'endless_mode'):  # Only execute in regular game mode
+                if use_random_boss and random.random() < 0.4:
                     # This is handled by our special case above in endless mode
                     mini_boss = BarrierGoliath(WIDTH, HEIGHT, game_state, all_sprites, enemies, enemy_bullets, powerups, PowerUp, EnemySpreadBullet)
                     mini_boss.max_health *= 1 + (game_state.sector - 6) * 0.2  # +20% health per sector above 6
                     mini_boss.health = mini_boss.max_health
                     all_sprites.add(mini_boss)
                     enemies.add(mini_boss)
-                elif not hasattr(game_state, 'endless_mode'):  # Only execute in regular game mode
-                    # This is handled by our special case above in endless mode
+                    # Ensure we don't spawn regular enemies during a boss wave
+                    game_state.boss_fight = True
+                    print(f"Spawned mini-boss for endless sector {game_state.sector}")
+                elif not use_random_boss:  # Regular game mode or early endless sectors
+                    # In regular game mode, always use the correct sector boss
+                    # Mini-bosses don't replace sector bosses in normal progression
                     boss = Boss(game_state.sector)
-                    if game_state.sector > 6:
+                    if hasattr(game_state, 'endless_mode') and game_state.endless_mode and game_state.sector > 6:
                         health_multiplier = 1 + (game_state.sector - 6) * 0.3  # +30% health per sector above 6
                         boss.max_health *= health_multiplier
                         boss.health = boss.max_health
@@ -2399,11 +2747,27 @@ while running:
                         boss.score_value = 500 + (game_state.sector - 6) * 300  # More points in higher sectors
                     all_sprites.add(boss)
                     bosses.add(boss)
-                
-                game_state.boss_fight = True
+                    # Ensure we don't spawn regular enemies during a boss wave
+                    game_state.boss_fight = True
+                    print(f"Spawned sector {game_state.sector} boss")
+                else: # This is the else for the use_random_boss and random.random() check
+                    # Create a random boss for endless mode
+                    boss = create_random_boss(game_state.sector)
+                    all_sprites.add(boss)
+                    bosses.add(boss)
+                    # Ensure we don't spawn regular enemies during a boss wave
+                    game_state.boss_fight = True
+                    print(f"Created random boss from pool for endless sector {game_state.sector}")
             else:
-                # Spawn more enemies
+                # Not a boss wave, spawn regular enemies
+                if game_state.boss_fight:
+                    # This shouldn't happen, but if it does, reset the flag
+                    game_state.boss_fight = False
+                    print(f"Resetting boss_fight flag in wave {game_state.wave}")
+                
+                # Spawn new wave of enemies
                 for i in range(game_state.wave_enemies):
+                    # Choose enemy type based on wave and sector
                     enemy_roll = random.random()
                     
                     # Use a weighted selection system for different enemy types
@@ -2421,14 +2785,26 @@ while running:
                         enemy = Enemy("blade_spinner")
                     else:  # 35% chance of basic enemy
                         enemy = Enemy("basic")
+                        
+                    # Place it randomly at the top of the screen with some spacing
+                    enemy.rect.x = random.randint(0 + enemy.rect.width, WIDTH - enemy.rect.width)
+                    enemy.rect.bottom = random.randint(-150, -20)
                     all_sprites.add(enemy)
                     enemies.add(enemy)
                 
                 # Chance to spawn a mini-boss (Barrier Goliath) after wave 3
-                if game_state.wave > 3 and game_state.wave < game_state.waves_per_sector and random.random() < 0.15:  # 15% chance per wave after wave 3
-                    mini_boss = BarrierGoliath(WIDTH, HEIGHT, game_state, all_sprites, enemies, enemy_bullets, powerups, PowerUp, EnemySpreadBullet)
-                    all_sprites.add(mini_boss)
-                    enemies.add(mini_boss)
+                # Only if this is not a boss wave
+                if game_state.wave > 3 and game_state.wave < game_state.waves_per_sector and random.random() < 0.15 and not game_state.boss_fight:
+                    # Make sure we don't have too many enemies
+                    if len(enemies) > 10:
+                        # Too many enemies already - skip mini-boss for this wave
+                        print(f"Skipping mini-boss spawn - too many enemies ({len(enemies)})")
+                    else:
+                        print(f"Spawning mini-boss during wave {game_state.wave}")
+                        mini_boss = BarrierGoliath(WIDTH, HEIGHT, game_state, all_sprites, enemies, enemy_bullets, powerups, PowerUp, EnemySpreadBullet)
+                        all_sprites.add(mini_boss)
+                        enemies.add(mini_boss)
+                        # Note: We don't set boss_fight to True here since this isn't a boss wave
     
         # Draw portal special effects and text
         for portal in shop_portals:
@@ -2440,25 +2816,56 @@ while running:
         draw_text(gameplay_surface, f"Score: {game_state.score}", 36, WIDTH / 2, HEIGHT / 2)
         draw_text(gameplay_surface, f"Max Combo: x{game_state.max_combo}", 24, WIDTH / 2, HEIGHT / 2 + 50)
         
-        # Add a continue button
-        if draw_button(gameplay_surface, "Continue", 24, WIDTH / 2, HEIGHT * 3 / 4, 200, 50):
+        # Add a continue button - renamed to "Main Menu" for clarity
+        if draw_button(gameplay_surface, "Return to Menu", 24, WIDTH / 2, HEIGHT * 3 / 4, 250, 50):
             # Reset game
-            game_state.reset()
-            all_sprites = pygame.sprite.Group()
+            print("Game over: Returning to main menu...")
+            
+            # Force direct exit from this frame loop to prevent difficulty screen
+            # Instead of using global and return, set a special flag
+            
+            # First create a complete reset of the GameState
+            # Create a new instance of GameState with default values
+            temp_state = GameState()
+            
+            # Copy only necessary attributes from the temp state to ensure clean slate
+            game_state.state = "menu"  # Explicitly set to menu state
+            game_state.sector = temp_state.sector
+            game_state.wave = temp_state.wave
+            game_state.score = 0
+            game_state.combo = 1
+            game_state.max_combo = 1
+            game_state.resources = 0
+            game_state.boss_fight = False
+            game_state.wave_enemies = temp_state.wave_enemies
+            game_state.waves_per_sector = temp_state.waves_per_sector
+            game_state.bosses_defeated = 0
+            
+            # Preserve difficulty setting only
+            if not hasattr(game_state, 'difficulty'):
+                game_state.difficulty = "normal"
+                
+            # Remove any endless mode
+            if hasattr(game_state, 'endless_mode'):
+                delattr(game_state, 'endless_mode')
+            
+            # Reset all sprite groups to a clean slate
+            all_sprites.empty()
+            bullets.empty()
+            enemy_bullets.empty()
+            enemies.empty()
+            powerups.empty()
+            bosses.empty()
+            shop_portals.empty()
+            
+            # Create a new player for the menu
             player = Player()
-            bullets = pygame.sprite.Group()
-            enemy_bullets = pygame.sprite.Group()
-            enemies = pygame.sprite.Group()
-            powerups = pygame.sprite.Group()
-            bosses = pygame.sprite.Group()
-            shop_portals = pygame.sprite.Group()
             all_sprites.add(player)
             
-            # Create initial enemies
-            for i in range(game_state.wave_enemies):
-                enemy = Enemy()
-                all_sprites.add(enemy)
-                enemies.add(enemy)
+            # Set a special game state flag to prevent difficulty screen transition
+            game_state.skip_difficulty = True
+            
+            print("Game Over screen: Complete reset to menu state performed")
     
     elif game_state.state == "victory":
         # Draw victory screen
@@ -2545,15 +2952,53 @@ while running:
                 
         # Add quit button
         if draw_button(gameplay_surface, "Quit", 24, WIDTH / 2 + 120, HEIGHT * 3 / 4, 200, 50):
-            # Return to main menu
-            game_state.reset()
-            all_sprites = pygame.sprite.Group()
-            bullets = pygame.sprite.Group()
-            enemy_bullets = pygame.sprite.Group()
-            enemies = pygame.sprite.Group()
-            powerups = pygame.sprite.Group()
-            bosses = pygame.sprite.Group()
-            shop_portals = pygame.sprite.Group()
+            print("Victory screen: Quit button clicked, returning to main menu...")
+            
+            # More thorough reset similar to what we did for game over screen
+            # Create a temp state to get default values
+            temp_state = GameState()
+            
+            # Copy default values from temp_state to ensure a clean reset
+            game_state.state = "menu"
+            game_state.sector = temp_state.sector
+            game_state.wave = temp_state.wave
+            game_state.score = 0
+            game_state.combo = 1
+            game_state.max_combo = 1
+            game_state.resources = 0
+            game_state.boss_fight = False
+            game_state.wave_enemies = temp_state.wave_enemies
+            game_state.waves_per_sector = temp_state.waves_per_sector
+            
+            # Preserve difficulty and high score only
+            if not hasattr(game_state, 'difficulty'):
+                game_state.difficulty = "normal"
+                
+            # Ensure high score is saved
+            if not hasattr(game_state, 'high_score'):
+                game_state.high_score = 0
+                
+            # Ensure we clear endless mode
+            if hasattr(game_state, 'endless_mode'):
+                delattr(game_state, 'endless_mode')
+                
+            # Set the skip_difficulty flag to avoid difficulty screen
+            game_state.skip_difficulty = True
+            
+            # Clear all sprite groups
+            all_sprites.empty()
+            bullets.empty()
+            enemy_bullets.empty()
+            enemies.empty()
+            powerups.empty()
+            bosses.empty()
+            shop_portals.empty()
+            
+            # Create a new fresh player to avoid carrying over state
+            player = Player()
+            all_sprites.add(player)
+            
+            print("Victory screen: Complete reset performed, ready for new game")
     
     # Draw the gameplay surface to the screen with offsets
     screen.blit(gameplay_surface, (OFFSET_X, OFFSET_Y))

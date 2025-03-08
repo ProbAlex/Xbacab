@@ -204,12 +204,19 @@ class BarrierGoliath(pygame.sprite.Sprite):
         if self.health <= 0:
             # Clear any bullets this enemy fired
             for bullet in self.bullets[:]:
-                if bullet in self.enemy_bullets:
-                    self.enemy_bullets.remove(bullet)
-                if bullet in self.all_sprites:
-                    self.all_sprites.remove(bullet)
                 bullet.kill()
             self.bullets.clear()
+            
+            # Ensure all bullets from barrier minions are also cleared
+            for barrier in self.barriers:
+                if hasattr(barrier, 'bullets'):
+                    for bullet in barrier.bullets[:]:
+                        bullet.kill()
+                    barrier.bullets.clear()
+            
+            # Also remove barriers
+            for barrier in self.barriers:
+                barrier.kill()
             
             # Drop multiple power-ups
             self.drop_powerups()
@@ -229,6 +236,7 @@ class BarrierGoliath(pygame.sprite.Sprite):
             
             # Reset boss_fight flag directly as a backup
             self.game_state.boss_fight = False
+            print("Mini-boss defeated! Set boss_fight to False")
             
             # Remove the mini-boss from the game
             self.kill()
