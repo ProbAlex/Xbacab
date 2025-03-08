@@ -3,10 +3,19 @@ import sys
 import random
 import math
 from pygame.locals import *
+import os
+
+# Set SDL audio driver to a fallback before initializing
+os.environ['SDL_AUDIODRIVER'] = 'dummy'  # This uses a dummy audio driver
 
 # Initialize pygame
 pygame.init()
-pygame.mixer.init()
+
+# Try initializing audio with fallback options
+try:
+    pygame.mixer.init()
+except pygame.error:
+    print("Warning: Audio could not be initialized, game will run without sound")
 
 # Game constants
 WIDTH = 800
@@ -41,7 +50,6 @@ def load_image(name, scale=1):
         return surf
 
 # Create resource folders
-import os
 if not os.path.exists("assets"):
     os.makedirs("assets")
 
@@ -56,8 +64,8 @@ class Player(pygame.sprite.Sprite):
         self.rect.bottom = HEIGHT - 20
         self.speedx = 0
         self.speedy = 0
-        self.health = 100
-        self.max_health = 100
+        self.health = 150
+        self.max_health = 150
         self.energy = 100
         self.max_energy = 100
         self.energy_regen = 0.5
@@ -139,10 +147,6 @@ class Player(pygame.sprite.Sprite):
             if now - self.invincible_start > self.invincible_duration:
                 self.invincible = False
                 
-        # Update drones
-        for drone in self.drone_list:
-            drone.update(self)
-
     def shoot(self):
         if self.weapon_type == "normal":
             bullet = Bullet(self.rect.centerx, self.rect.top)
@@ -172,10 +176,6 @@ class Player(pygame.sprite.Sprite):
             laser = Laser(self.rect.centerx, self.rect.top, self.weapon_level)
             all_sprites.add(laser)
             bullets.add(laser)
-            
-        # Drones also shoot
-        for drone in self.drone_list:
-            drone.shoot()
 
     def hyper_dash(self):
         now = pygame.time.get_ticks()
@@ -214,14 +214,15 @@ class Drone(pygame.sprite.Sprite):
         self.player = player
         self.position = position  # 0 for left, 1 for right
         
-    def update(self, player):
+    def update(self, *args):
         # Position the drone relative to the player
+        # Modified to not require player parameter from sprite group update
         offset = 30
         if self.position == 0:
-            self.rect.right = player.rect.left - 10
+            self.rect.right = self.player.rect.left - 10
         else:
-            self.rect.left = player.rect.right + 10
-        self.rect.centery = player.rect.centery
+            self.rect.left = self.player.rect.right + 10
+        self.rect.centery = self.player.rect.centery
         
     def shoot(self):
         bullet = Bullet(self.rect.centerx, self.rect.top)
@@ -295,9 +296,9 @@ class Enemy(pygame.sprite.Sprite):
             self.image = pygame.Surface((40, 40), pygame.SRCALPHA)
             pygame.draw.polygon(self.image, RED, [(0, 0), (40, 0), (20, 40)])
             self.rect = self.image.get_rect()
-            self.health = 20
-            self.speed = random.randrange(3, 8)
-            self.shoot_delay = 1500
+            self.health = 10
+            self.speed = random.randrange(2, 5)
+            self.shoot_delay = 2000
             self.score_value = 10
             
         elif enemy_type == "elite":
@@ -332,7 +333,7 @@ class Enemy(pygame.sprite.Sprite):
             all_sprites.add(bullet)
             enemy_bullets.add(bullet)
         elif self.enemy_type == "elite":
-            for angle in range(-30, 31, 30):
+            for angle in range(-30, 31, 60):  # Changed from 30 to 60 (fewer bullets)
                 bullet = EnemySpreadBullet(self.rect.centerx, self.rect.bottom, angle)
                 all_sprites.add(bullet)
                 enemy_bullets.add(bullet)
@@ -341,7 +342,7 @@ class Enemy(pygame.sprite.Sprite):
         self.health -= damage
         if self.health <= 0:
             # Random chance to drop a power-up
-            if random.random() < 0.2:
+            if random.random() < 0.3:
                 power_up = PowerUp(self.rect.centerx, self.rect.centery)
                 all_sprites.add(power_up)
                 powerups.add(power_up)
@@ -358,8 +359,8 @@ class EnemyBullet(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
         self.rect.centerx = x
         self.rect.top = y
-        self.speedy = 8
-        self.damage = 10
+        self.speedy = 5
+        self.damage = 5
         
     def update(self):
         self.rect.y += self.speedy
@@ -587,7 +588,7 @@ class GameState:
         self.difficulty = "normal"
         self.resources = 0
         self.boss_fight = False
-        self.wave_enemies = 8  # Number of enemies per wave
+        self.wave_enemies = 5
         self.waves_per_sector = 5  # Waves to complete before boss
         
     def reset(self):
@@ -598,7 +599,7 @@ class GameState:
         self.combo = 1
         self.resources = 0
         self.boss_fight = False
-        self.wave_enemies = 8  # Number of enemies per wave
+        self.wave_enemies = 5
         self.waves_per_sector = 5  # Waves to complete before boss
         
     def next_wave(self):
@@ -721,6 +722,17 @@ def show_upgrade_menu():
     
     return
 
+# Add basic sprite cleanup to save resources
+def cleanup_sprites():
+    # Remove sprites that are far off screen
+    for sprite in all_sprites:
+        if hasattr(sprite, 'rect'):
+            if (sprite.rect.top > HEIGHT + 100 or 
+                sprite.rect.bottom < -100 or
+                sprite.rect.right < -100 or
+                sprite.rect.left > WIDTH + 100):
+                sprite.kill()
+
 # Game loop
 running = True
 while running:
@@ -832,6 +844,9 @@ while running:
                     player.weapon_level = 1
             elif powerup.type == "drone":
                 player.add_drone()
+        
+        # Add this line:
+        cleanup_sprites()
     
     # Draw / render
     screen.fill(BLACK)
