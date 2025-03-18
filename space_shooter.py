@@ -5,6 +5,7 @@ import math
 from pygame.locals import *
 import os
 from barrier_goliath import BarrierGoliath
+import create_assets
 
 # Set SDL audio driver to a fallback before initializing
 os.environ['SDL_AUDIODRIVER'] = 'dummy'  # This uses a dummy audio driver
@@ -66,8 +67,12 @@ if not os.path.exists("assets"):
 class Player(pygame.sprite.Sprite):
     def __init__(self):
         pygame.sprite.Sprite.__init__(self)
-        self.image = pygame.Surface((50, 40), pygame.SRCALPHA)
-        pygame.draw.polygon(self.image, BLUE, [(0, 40), (25, 0), (50, 40)])
+        try:
+            self.image = load_image("assets/images/player_ship.png")
+        except:
+            # Fallback if image loading fails
+            self.image = pygame.Surface((50, 40), pygame.SRCALPHA)
+            pygame.draw.polygon(self.image, BLUE, [(0, 40), (25, 0), (50, 40)])
         self.rect = self.image.get_rect()
         # Position player within the original game coordinates (no offset)
         self.rect.centerx = WIDTH // 2
@@ -311,8 +316,12 @@ class Player(pygame.sprite.Sprite):
 class Drone(pygame.sprite.Sprite):
     def __init__(self, player, position):
         pygame.sprite.Sprite.__init__(self)
-        self.image = pygame.Surface((20, 20), pygame.SRCALPHA)
-        pygame.draw.circle(self.image, BLUE, (10, 10), 10)
+        try:
+            self.image = load_image("assets/images/drone.png")
+        except:
+            # Fallback if image loading fails
+            self.image = pygame.Surface((20, 20), pygame.SRCALPHA)
+            pygame.draw.circle(self.image, BLUE, (10, 10), 10)
         self.rect = self.image.get_rect()
         self.player = player
         self.position = position  # Index in drone list
@@ -653,8 +662,12 @@ class Enemy(pygame.sprite.Sprite):
         
         # Common features based on enemy type
         if enemy_type == "basic":
-            self.image = pygame.Surface((40, 40), pygame.SRCALPHA)
-            pygame.draw.polygon(self.image, RED, [(0, 0), (40, 0), (20, 40)])
+            try:
+                self.image = load_image("assets/images/basic_enemy.png")
+            except:
+                # Fallback if image loading fails
+                self.image = pygame.Surface((40, 40), pygame.SRCALPHA)
+                pygame.draw.polygon(self.image, RED, [(0, 0), (40, 0), (20, 40)])
             self.rect = self.image.get_rect()
             
             # Adjust health based on difficulty
@@ -670,8 +683,12 @@ class Enemy(pygame.sprite.Sprite):
             self.score_value = 10
             
         elif enemy_type == "elite":
-            self.image = pygame.Surface((60, 60), pygame.SRCALPHA)
-            pygame.draw.polygon(self.image, PURPLE, [(0, 0), (60, 0), (30, 60)])
+            try:
+                self.image = load_image("assets/images/elite_enemy.png")
+            except:
+                # Fallback if image loading fails
+                self.image = pygame.Surface((60, 60), pygame.SRCALPHA)
+                pygame.draw.polygon(self.image, PURPLE, [(0, 0), (60, 0), (30, 60)])
             self.rect = self.image.get_rect()
             
             # Adjust health based on difficulty
@@ -688,9 +705,14 @@ class Enemy(pygame.sprite.Sprite):
             
         # New enemy types
         elif enemy_type == "cloaked_ambusher":
-            self.image = pygame.Surface((45, 45), pygame.SRCALPHA)
-            pygame.draw.polygon(self.image, (100, 100, 150), [(0, 0), (45, 0), (22, 45)])  # Light blue-purple
-            self.original_image = self.image.copy()
+            try:
+                self.image = load_image("assets/images/cloaked_ambusher.png")
+                self.original_image = self.image.copy()
+            except:
+                # Fallback if image loading fails
+                self.image = pygame.Surface((45, 45), pygame.SRCALPHA)
+                pygame.draw.polygon(self.image, (100, 100, 150), [(0, 0), (45, 0), (22, 45)])  # Light blue-purple
+                self.original_image = self.image.copy()
             self.rect = self.image.get_rect()
             
             # Cloaking variables
@@ -716,8 +738,15 @@ class Enemy(pygame.sprite.Sprite):
             self.score_value = 20
             
         elif enemy_type == "splitter_drone":
-            self.image = pygame.Surface((50, 50), pygame.SRCALPHA)
-            pygame.draw.circle(self.image, (0, 180, 180), (25, 25), 25)  # Teal color
+            try:
+                if not hasattr(self, 'is_split') or not self.is_split:
+                    self.image = load_image("assets/images/splitter_drone.png")
+                else:
+                    self.image = load_image("assets/images/mini_splitter_drone.png")
+            except:
+                # Fallback if image loading fails
+                self.image = pygame.Surface((50, 50), pygame.SRCALPHA)
+                pygame.draw.circle(self.image, (0, 180, 180), (25, 25), 25)  # Teal color
             self.rect = self.image.get_rect()
             self.is_split = False  # Whether this is a split version
             
@@ -733,8 +762,12 @@ class Enemy(pygame.sprite.Sprite):
             self.score_value = 15
             
         elif enemy_type == "shield_bearer":
-            self.image = pygame.Surface((55, 55), pygame.SRCALPHA)
-            pygame.draw.circle(self.image, (50, 150, 250), (27, 27), 27)  # Light blue
+            try:
+                self.image = load_image("assets/images/shield_bearer.png")
+            except:
+                # Fallback if image loading fails
+                self.image = pygame.Surface((55, 55), pygame.SRCALPHA)
+                pygame.draw.circle(self.image, (50, 150, 250), (27, 27), 27)  # Light blue
             self.rect = self.image.get_rect()
             
             # Shield variables
@@ -756,8 +789,12 @@ class Enemy(pygame.sprite.Sprite):
             self.score_value = 25
             
         elif enemy_type == "energy_sapper":
-            self.image = pygame.Surface((45, 55), pygame.SRCALPHA)
-            pygame.draw.ellipse(self.image, (200, 100, 200), (0, 0, 45, 55))  # Pink-purple
+            try:
+                self.image = load_image("assets/images/energy_sapper.png")
+            except:
+                # Fallback if image loading fails
+                self.image = pygame.Surface((45, 55), pygame.SRCALPHA)
+                pygame.draw.ellipse(self.image, (200, 100, 200), (0, 0, 45, 55))  # Pink-purple
             self.rect = self.image.get_rect()
             
             # Sapper beam variables
@@ -779,16 +816,20 @@ class Enemy(pygame.sprite.Sprite):
             self.score_value = 30
             
         elif enemy_type == "blade_spinner":
-            self.image = pygame.Surface((48, 48), pygame.SRCALPHA)
-            # Draw a spinning blade-like appearance
-            points = []
-            center = (24, 24)
-            for i in range(8):  # 8-pointed star
-                angle = math.pi * i / 4
-                points.append((center[0] + 24 * math.cos(angle), center[1] + 24 * math.sin(angle)))
-                angle += math.pi / 8
-                points.append((center[0] + 12 * math.cos(angle), center[1] + 12 * math.sin(angle)))
-            pygame.draw.polygon(self.image, (255, 150, 0), points)  # Orange color
+            try:
+                self.image = load_image("assets/images/blade_spinner.png")
+            except:
+                # Fallback if image loading fails
+                self.image = pygame.Surface((48, 48), pygame.SRCALPHA)
+                # Draw a spinning blade-like appearance
+                points = []
+                center = (24, 24)
+                for i in range(8):  # 8-pointed star
+                    angle = math.pi * i / 4
+                    points.append((center[0] + 24 * math.cos(angle), center[1] + 24 * math.sin(angle)))
+                    angle += math.pi / 8
+                    points.append((center[0] + 12 * math.cos(angle), center[1] + 12 * math.sin(angle)))
+                pygame.draw.polygon(self.image, (255, 150, 0), points)  # Orange color
             self.rect = self.image.get_rect()
             
             # Spinning variables
@@ -1383,45 +1424,69 @@ class Boss(pygame.sprite.Sprite):
         # Boss visuals and stats based on sector
         if sector == 1:
             # Nova Prime Edge Boss
-            self.image = pygame.Surface((100, 100), pygame.SRCALPHA)
-            pygame.draw.polygon(self.image, RED, [(0, 0), (100, 0), (100, 100), (50, 75), (0, 100)])
+            try:
+                self.image = load_image(f"assets/images/boss_{sector}.png")
+            except:
+                # Fallback if image loading fails
+                self.image = pygame.Surface((100, 100), pygame.SRCALPHA)
+                pygame.draw.polygon(self.image, RED, [(0, 0), (100, 0), (100, 100), (50, 75), (0, 100)])
             self.max_health = int(500 * difficulty_mult)
             self.shoot_delay = int(800 / difficulty_mult)  # Shorter delay = faster shooting on higher difficulties
             self.name = "Sector 1 - Edge Guardian"
         elif sector == 2:
             # Asteroid Field Anomaly
-            self.image = pygame.Surface((120, 120), pygame.SRCALPHA)
-            pygame.draw.circle(self.image, (150, 75, 0), (60, 60), 60)
+            try:
+                self.image = load_image(f"assets/images/boss_{sector}.png")
+            except:
+                # Fallback if image loading fails
+                self.image = pygame.Surface((120, 120), pygame.SRCALPHA)
+                pygame.draw.circle(self.image, (150, 75, 0), (60, 60), 60)
             self.max_health = int(800 * difficulty_mult)
             self.shoot_delay = int(700 / difficulty_mult)
             self.name = "Sector 2 - Asteroid Titan"
         elif sector == 3:
             # Rhovax Border Patrol
-            self.image = pygame.Surface((150, 100), pygame.SRCALPHA)
-            pygame.draw.polygon(self.image, (150, 0, 150), [(0, 50), (75, 0), (150, 50), (75, 100)])
+            try:
+                self.image = load_image(f"assets/images/boss_{sector}.png")
+            except:
+                # Fallback if image loading fails
+                self.image = pygame.Surface((150, 100), pygame.SRCALPHA)
+                pygame.draw.polygon(self.image, (150, 0, 150), [(0, 50), (75, 0), (150, 50), (75, 100)])
             self.max_health = int(1200 * difficulty_mult)
             self.shoot_delay = int(600 / difficulty_mult)
             self.name = "Sector 3 - Rhovax Dreadnought"
         elif sector == 4:
             # Dominion Shipyards
-            self.image = pygame.Surface((160, 160), pygame.SRCALPHA)
-            pygame.draw.rect(self.image, (0, 100, 200), (0, 0, 160, 160))
-            pygame.draw.rect(self.image, (0, 0, 0), (30, 30, 100, 100))
+            try:
+                self.image = load_image(f"assets/images/boss_{sector}.png")
+            except:
+                # Fallback if image loading fails
+                self.image = pygame.Surface((160, 160), pygame.SRCALPHA)
+                pygame.draw.rect(self.image, (0, 100, 200), (0, 0, 160, 160))
+                pygame.draw.rect(self.image, (0, 0, 0), (30, 30, 100, 100))
             self.max_health = int(2000 * difficulty_mult)
             self.shoot_delay = int(500 / difficulty_mult)
             self.name = "Sector 4 - Shipyard Sentinel"
         elif sector == 5:
             # Cosmic Storm Nexus
-            self.image = pygame.Surface((180, 150), pygame.SRCALPHA)
-            pygame.draw.ellipse(self.image, (50, 50, 200), (0, 0, 180, 150))
-            pygame.draw.ellipse(self.image, (100, 0, 100), (30, 30, 120, 90))
+            try:
+                self.image = load_image(f"assets/images/boss_{sector}.png")
+            except:
+                # Fallback if image loading fails
+                self.image = pygame.Surface((180, 150), pygame.SRCALPHA)
+                pygame.draw.ellipse(self.image, (50, 50, 200), (0, 0, 180, 150))
+                pygame.draw.ellipse(self.image, (100, 0, 100), (30, 30, 120, 90))
             self.max_health = int(3000 * difficulty_mult)
             self.shoot_delay = int(400 / difficulty_mult)
             self.name = "Sector 5 - Storm Lord"
         else:  # Sector 6 - Final Boss
             # Dominion Mothership
-            self.image = pygame.Surface((200, 200), pygame.SRCALPHA)
-            pygame.draw.polygon(self.image, (200, 0, 0), [(0, 0), (200, 0), (160, 100), (200, 200), (0, 200), (40, 100)])
+            try:
+                self.image = load_image(f"assets/images/boss_{sector}.png")
+            except:
+                # Fallback if image loading fails
+                self.image = pygame.Surface((200, 200), pygame.SRCALPHA)
+                pygame.draw.polygon(self.image, (200, 0, 0), [(0, 0), (200, 0), (160, 100), (200, 200), (0, 200), (40, 100)])
             self.max_health = int(5000 * difficulty_mult)
             self.shoot_delay = int(300 / difficulty_mult)
             self.name = "Sector 6 - Dominion Mothership"
@@ -3008,4 +3073,4 @@ while running:
 
 # Quit the game
 pygame.quit()
-sys.exit() 
+sys.exit()
