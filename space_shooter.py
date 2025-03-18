@@ -19,8 +19,8 @@ SCREEN_WIDTH = screen_info.current_w
 SCREEN_HEIGHT = screen_info.current_h
 
 # Game design constants (internal resolution)
-WIDTH = 800
-HEIGHT = 900
+WIDTH = int(SCREEN_WIDTH * 0.8)
+HEIGHT = int(SCREEN_HEIGHT * 0.8)
 FPS = 60
 
 # Calculate centering offset for gameplay elements
