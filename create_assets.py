@@ -10,6 +10,9 @@ pygame.init()
 if not os.path.exists("assets/images"):
     os.makedirs("assets/images")
 
+if not os.path.exists("assets/sounds"):
+    os.makedirs("assets/sounds")
+
 # Set up colors
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
@@ -326,6 +329,191 @@ def create_dominion_mothership():
     
     return surface
 
+# Create bullet assets
+def create_normal_bullet():
+    """Create a normal bullet"""
+    width, height = 5, 15
+    surface = pygame.Surface((width, height), pygame.SRCALPHA)
+    
+    # Draw the bullet body
+    pygame.draw.rect(surface, YELLOW, (0, 0, width, height))
+    
+    # Add a small highlight
+    pygame.draw.rect(surface, (255, 255, 180), (width//2, 0, width//2, height//4))
+    
+    return surface
+
+def create_spread_bullet():
+    """Create a spread bullet"""
+    width, height = 5, 15
+    surface = pygame.Surface((width, height), pygame.SRCALPHA)
+    
+    # Draw the bullet body
+    pygame.draw.rect(surface, GREEN, (0, 0, width, height))
+    
+    # Add a small highlight
+    pygame.draw.rect(surface, (180, 255, 180), (width//2, 0, width//2, height//4))
+    
+    return surface
+
+def create_bouncing_bullet():
+    """Create a bouncing bullet"""
+    size = 8
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    
+    # Draw the bullet body (circle)
+    pygame.draw.circle(surface, GREEN, (size//2, size//2), size//2)
+    
+    # Add a small highlight
+    pygame.draw.circle(surface, (180, 255, 180), (size//3, size//3), size//4)
+    
+    return surface
+
+def create_homing_bullet():
+    """Create a homing bullet"""
+    size = 8
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    
+    # Draw the bullet body (circle)
+    pygame.draw.circle(surface, ORANGE, (size//2, size//2), size//2)
+    
+    # Add a small highlight
+    pygame.draw.circle(surface, (255, 200, 150), (size//3, size//3), size//4)
+    
+    return surface
+
+def create_enemy_bullet():
+    """Create an enemy bullet"""
+    width, height = 5, 15
+    surface = pygame.Surface((width, height), pygame.SRCALPHA)
+    
+    # Draw the bullet body
+    pygame.draw.rect(surface, RED, (0, 0, width, height))
+    
+    # Add a small highlight
+    pygame.draw.rect(surface, (255, 150, 150), (width//2, 0, width//2, height//4))
+    
+    return surface
+
+def create_enemy_spread_bullet():
+    """Create an enemy spread bullet"""
+    size = 8
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    
+    # Draw the bullet body (square/diamond)
+    pygame.draw.rect(surface, PURPLE, (0, 0, size, size))
+    
+    # Add a small highlight
+    pygame.draw.rect(surface, (200, 150, 200), (size//4, size//4, size//2, size//2))
+    
+    return surface
+
+# Create power-up assets
+def create_health_powerup():
+    """Create a health power-up"""
+    size = 25
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    
+    # Draw the main power-up shape
+    pygame.draw.circle(surface, GREEN, (size//2, size//2), size//2)
+    
+    # Add a plus sign for health
+    line_width = 4
+    pygame.draw.rect(surface, WHITE, (size//2 - line_width//2, size//4, line_width, size//2))  # Vertical line
+    pygame.draw.rect(surface, WHITE, (size//4, size//2 - line_width//2, size//2, line_width))  # Horizontal line
+    
+    return surface
+
+def create_shield_powerup():
+    """Create a shield power-up"""
+    size = 25
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    
+    # Draw the main power-up shape
+    pygame.draw.circle(surface, BLUE, (size//2, size//2), size//2)
+    
+    # Add a shield symbol
+    pygame.draw.arc(surface, WHITE, (size//4, size//4, size//2, size//2), 0, math.pi, 3)
+    
+    return surface
+
+def create_weapon_powerup():
+    """Create a weapon power-up"""
+    size = 25
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    
+    # Draw the main power-up shape
+    pygame.draw.circle(surface, YELLOW, (size//2, size//2), size//2)
+    
+    # Add a weapon symbol (star)
+    center = (size//2, size//2)
+    points = 5
+    inner_radius = size//6
+    outer_radius = size//3
+    angle = math.pi / 2  # Start at top
+    
+    star_points = []
+    for i in range(points * 2):
+        radius = outer_radius if i % 2 == 0 else inner_radius
+        x = center[0] + radius * math.cos(angle)
+        y = center[1] + radius * math.sin(angle)
+        star_points.append((x, y))
+        angle += math.pi / points
+        
+    pygame.draw.polygon(surface, WHITE, star_points)
+    
+    return surface
+
+def create_drone_powerup():
+    """Create a drone power-up"""
+    size = 25
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    
+    # Draw the main power-up shape
+    pygame.draw.circle(surface, PURPLE, (size//2, size//2), size//2)
+    
+    # Add a drone symbol (small circle)
+    pygame.draw.circle(surface, WHITE, (size//2, size//2), size//4)
+    
+    return surface
+
+# Create sound effects
+def create_laser_sound():
+    """Create a laser sound effect using wave and struct modules"""
+    import wave
+    import struct
+    import array
+    import os
+    
+    # Ensure the sounds directory exists
+    if not os.path.exists("assets/sounds"):
+        os.makedirs("assets/sounds")
+    
+    # Sound parameters
+    sample_rate = 44100
+    duration = 0.2  # seconds
+    frequency = 440.0  # A4 note
+    
+    # Create the audio data
+    num_samples = int(sample_rate * duration)
+    data = array.array('h', [0] * num_samples)  # signed short integer array
+    
+    # Generate a simple laser-like sound
+    for i in range(num_samples):
+        t = float(i) / sample_rate  # Time in seconds
+        # Decreasing frequency over time (from 1000Hz to 300Hz)
+        freq = 1000 - (700 * t / duration)
+        # Decreasing amplitude over time
+        amp = 32767 * (1 - t / duration)  # 32767 is max amplitude for signed short
+        data[i] = int(amp * math.sin(2 * math.pi * freq * t))
+    
+    # Save the audio data to a WAV file
+    with wave.open("assets/sounds/laser.wav", 'w') as wav_file:
+        # Set the parameters
+        wav_file.setparams((1, 2, sample_rate, num_samples, 'NONE', 'not compressed'))
+        # Write the data
+        wav_file.writeframes(data.tobytes())
+
 # Generate and save the assets
 def generate_assets():
     # Player ship
@@ -383,6 +571,52 @@ def generate_assets():
     dominion_mothership = create_dominion_mothership()
     pygame.image.save(dominion_mothership, "assets/images/boss_6.png")
     print("Created boss_6.png (Dominion Mothership)")
+    
+    # Bullet assets
+    normal_bullet = create_normal_bullet()
+    pygame.image.save(normal_bullet, "assets/images/bullet.png")
+    print("Created bullet.png")
+    
+    spread_bullet = create_spread_bullet()
+    pygame.image.save(spread_bullet, "assets/images/spread_bullet.png")
+    print("Created spread_bullet.png")
+    
+    bouncing_bullet = create_bouncing_bullet()
+    pygame.image.save(bouncing_bullet, "assets/images/bouncing_bullet.png")
+    print("Created bouncing_bullet.png")
+    
+    homing_bullet = create_homing_bullet()
+    pygame.image.save(homing_bullet, "assets/images/homing_bullet.png")
+    print("Created homing_bullet.png")
+    
+    enemy_bullet = create_enemy_bullet()
+    pygame.image.save(enemy_bullet, "assets/images/enemy_bullet.png")
+    print("Created enemy_bullet.png")
+    
+    enemy_spread_bullet = create_enemy_spread_bullet()
+    pygame.image.save(enemy_spread_bullet, "assets/images/enemy_spread_bullet.png")
+    print("Created enemy_spread_bullet.png")
+    
+    # Power-up assets
+    health_powerup = create_health_powerup()
+    pygame.image.save(health_powerup, "assets/images/health_powerup.png")
+    print("Created health_powerup.png")
+    
+    shield_powerup = create_shield_powerup()
+    pygame.image.save(shield_powerup, "assets/images/shield_powerup.png")
+    print("Created shield_powerup.png")
+    
+    weapon_powerup = create_weapon_powerup()
+    pygame.image.save(weapon_powerup, "assets/images/weapon_powerup.png")
+    print("Created weapon_powerup.png")
+    
+    drone_powerup = create_drone_powerup()
+    pygame.image.save(drone_powerup, "assets/images/drone_powerup.png")
+    print("Created drone_powerup.png")
+    
+    # Create placeholder sound effects
+    create_laser_sound()
+    print("Created laser.wav")
     
     print("All assets generated successfully!")
 
